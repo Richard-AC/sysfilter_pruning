@@ -8,7 +8,7 @@ use gimli::{Dwarf, Reader, Unit, UnitOffset};
 use gimli::DieReference::UnitRef;
 use gimli::{DebuggingInformationEntry, EntriesCursor};
 
-use sysfilter_pruning::json;
+use sysfilter_pruning::sysfilter;
 
 /// Dwarf info of each module
 struct DwarfinfoDict<R> (HashMap::<String, Dwarf<R>>);
@@ -45,14 +45,17 @@ enum TypeToken {
     Function(FunctionType)
 }
 
-struct InitialAnalysis {
-    scope: u32,
-}
-
 fn main() {
-    let json_data = json::load_json("/home/debian/git/git.json");
+    let initial_analysis = sysfilter::initial_sysfilter_analysis(
+        "/home/debian/sysfilter/extraction/app/sysfilter_extract",
+        "/home/debian/git/git",
+        "git.json");
+    println!("Initial analysis : {:#?}", initial_analysis);
+
+    //let json_data = sysfilter::load_json("/home/debian/git/git.json");
     //println!("{:#?}", json_data);
-    println!("{:#?}", json_data["analysis_scope"]);
+    panic!();
+
 
 
     for path in env::args().skip(1) {
