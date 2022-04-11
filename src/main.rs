@@ -156,6 +156,7 @@ fn main() {
     }
 
     // Find function types of indirect_targets
+    /*
     let mut all_function_types = HashMap::new();
     for (module_name, _) in initial_analysis.scope.0 {
         println!("{:?}", module_name);
@@ -164,14 +165,23 @@ fn main() {
         all_function_types.extend(function_types);
     }
     println!("{:#?}", all_function_types);
+    */
 
     // Get DCG
-    
+    let sym = Symbol {module: String::from("(executable)"), name: String::from("main")};
+    let dcg = sysfilter::get_DCG(&initial_analysis.direct_edges, sym);
+    println!("{:?}", dcg);
 
-    /*
-    let function_type = find_function_type(&dwarf_dict.0["libc.so.6"], "pthread_setschedparam");
-    println!("{:?}", function_type);
-    panic!();*/
+    for fun in dcg {
+        println!("{}", fun);
+        let tokens: Vec<&str> = fun.split(|c| c == '@' || c == '+').collect();
+        let module_name = tokens[0];
+        let function_name = tokens[1];
+        let fun_ptrs_types = find_function_pointers_types(&dwarf_dict.0[module_name], function_name);
+        println!("{:?}", fun_ptrs_types);
+    }	
+
+    panic!();
     for fun in initial_analysis.indirect_targets {
         println!("{:?}", fun);
         let function_type = find_function_type(&dwarf_dict.0[&fun.module], &fun.name);
@@ -464,9 +474,12 @@ where R: Reader, <R as Reader>::Offset: LowerHex {
 
 fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &DebuggingInformationEntry<R>) 
 -> HashSet<FunctionType> where R: Reader, <R as Reader>::Offset: LowerHex {
+    println!("Finding Function pointers in {} {:?}", entry.tag(), entry.offset());
+
     match entry.tag() {
         gimli::constants::DW_TAG_pointer_type
         | gimli::constants::DW_TAG_array_type
+        | gimli::constants::DW_TAG_const_type
         | gimli::constants::DW_TAG_typedef => {
             match entry.attr_value(gimli::constants::DW_AT_type).unwrap() {
                 // void*
@@ -489,7 +502,8 @@ fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &D
                 Err(_) => { return HashSet::new(); }
             };
         },
-        gimli::constants::DW_TAG_structure_type => {
+        gimli::constants::DW_TAG_structure_type 
+        | gimli::constants::DW_TAG_union_type => {
             let mut function_types = HashSet::new();
             let mut tree = unit.entries_tree(Some(entry.offset())).unwrap();
             let root = tree.root().unwrap();
@@ -497,7 +511,6 @@ fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &D
             let mut children = root.children();
             // Iterate through members
             while let Some(child) = children.next().unwrap() {
-                println!("{}", child.entry().tag());
                 let at_type_value = child.entry().attr_value(gimli::constants::DW_AT_type)
                     .unwrap().expect("This local var or parameter has no type");
                 let member_type_DIE = get_DIE_at_offset(dwarf, unit, &at_type_value);
@@ -507,7 +520,8 @@ fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &D
             }
             return function_types;
         }
-        gimli::constants::DW_TAG_base_type => {
+        gimli::constants::DW_TAG_base_type
+        | gimli::constants::DW_TAG_enumeration_type => {
             return HashSet::new();
         }
         _ => {panic!("Don't know how to find pointers in {}", entry.tag());}
@@ -576,13 +590,14 @@ fn find_function_pointers<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &Debugging
             }
             // We deal with lexical block like a function
             gimli::constants::DW_TAG_lexical_block => {
-                return find_function_pointers(dwarf, unit, child.entry());
+                function_pointers_types.extend(
+                    find_function_pointers(dwarf, unit, child.entry())?);
             }
             _ => ()
 
         }
     }
-    Err(())
+    Ok(function_pointers_types)
 }
 
 /// Given a function name, find all the function pointer types present in that function
