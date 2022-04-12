@@ -5,7 +5,6 @@ use std::process::Command;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-//#[derive(Debug)]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Module {
     pub has_symbols:    bool,
@@ -13,7 +12,6 @@ pub struct Module {
 }
 
 /// Module name to Module hashmap
-//#[derive(Debug)]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Scope(pub HashMap<String, Module>);
 
@@ -26,7 +24,7 @@ pub struct Symbol {
 #[derive(Debug)]
 pub struct InitialAnalysis {
     pub scope: Scope,
-    pub indirect_targets: Vec<Symbol>,
+    pub indirect_targets: HashSet<Symbol>,
     pub thread_entry_points : Vec<Symbol>,
     pub direct_edges: Map<String, Value>,
 }
@@ -35,12 +33,11 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
                                   binary_path: &str,
                                   output_path: &str) -> InitialAnalysis {
     // Execute Sysfilter
-    /*
     Command::new(sysfilter_path)
         .args(["--full-json", "--arg-mode", "--dump-fcg", "-o", output_path, binary_path])
         .spawn()
         .expect("Failed to execute sysfilter")
-        .wait().expect("Failed to wait for sysfilter");*/
+        .wait().expect("Failed to wait for sysfilter");
     
     // Load the json output
     let json_data = load_json(output_path);
@@ -53,7 +50,7 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
     let indirect_targets = &json_data["vacuum"]["analysis"]["all"]["callgraph"]["indirect_targets"]
         .as_array().unwrap();
 
-    let mut indirect_targets_vec = vec!();
+    let mut indirect_targets_vec = HashSet::new();
 
     for indirect_target in *indirect_targets {
         let indirect_target = indirect_target.as_str().unwrap().to_owned();
@@ -61,7 +58,7 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
         let module_name = tokens[0];
         let function_name = tokens[1];
 
-        indirect_targets_vec.push(Symbol {
+        indirect_targets_vec.insert(Symbol {
             module: module_name.to_owned(),
             name: function_name.to_owned(),
         });
@@ -76,12 +73,17 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
         let target_function = argtrack_entry["target_function"].as_str().unwrap().to_owned();
         let target_function = target_function.split('@').collect::<Vec<&str>>()[0];
         if target_function == "pthread_create" {
-            let function_name = argtrack_entry["function_from_value"].as_str().unwrap().to_owned();
-            let module_name = argtrack_entry["module_from_value"].as_str().unwrap().to_owned();
-            thread_entry_points.push(Symbol {
-                module: module_name,
-                name: function_name,
-            })
+            let function_name = argtrack_entry["function_from_value"].as_str();
+            let module_name = argtrack_entry["module_from_value"].as_str();
+            match (function_name, module_name) {
+                (Some(function), Some(module)) => {
+                    thread_entry_points.push(Symbol {
+                        module: module.to_owned(),
+                        name: function.to_owned(),
+                    });
+                },
+                _ => ()
+            }
         }
 
     }
@@ -125,7 +127,7 @@ fn get_DCG_rec_helper(direct_edges: &Map<String, Value>, root: String, DCG: &mut
     }
 }
 
-pub fn get_DCG(direct_edges: &Map<String, Value>, root: Symbol) -> HashSet<String> {
+pub fn get_DCG_string(direct_edges: &Map<String, Value>, root: Symbol) -> HashSet<String> {
     let mut DCG = HashSet::new();
     DCG.insert(format!("{}@{}+0", root.module, root.name));
     for (fun, edges) in direct_edges {
@@ -140,6 +142,23 @@ pub fn get_DCG(direct_edges: &Map<String, Value>, root: Symbol) -> HashSet<Strin
         }
     }
     return DCG;
+}
+
+
+pub fn get_DCG(direct_edges: &Map<String, Value>, root: Symbol) -> HashSet<Symbol> {
+    let mut DCG = HashSet::new();
+    let dcg_string = get_DCG_string(direct_edges, root);
+    for fun in dcg_string {
+        let tokens: Vec<&str> = fun.split(|c| c == '@' || c == '+').collect();
+        let module_name = tokens[0];
+        let function_name = tokens[1];
+
+        DCG.insert(Symbol {
+            module: module_name.to_owned(),
+            name: function_name.to_owned(),
+        });
+    }
+    DCG
 }
 
 fn load_json(path: &str) -> Value {
