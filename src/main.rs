@@ -1,4 +1,4 @@
-//! A simple example of parsing `.debug_info`.
+#![allow(non_snake_case)]
 
 use core::fmt::LowerHex;
 use object::{Object, ObjectSection};
@@ -8,8 +8,7 @@ use std::borrow::Cow;
 use std::process::Command;
 
 use gimli::{Dwarf, Reader, Unit, UnitOffset};
-use gimli::DieReference::UnitRef;
-use gimli::{DebuggingInformationEntry, EntriesCursor};
+use gimli::DebuggingInformationEntry;
 use gimli::EndianSlice;
 
 use memmap::Mmap;
@@ -94,7 +93,7 @@ fn main() {
         sysfilter_path,
         binary_path,
         &output_json);
-    println!("Initial analysis : {:#?}", initial_analysis);
+    //println!("Initial analysis : {:#?}", initial_analysis);
     
     // Load the dwarf data in a really weird way to make to borrow checker happy
     // Mmap all the files in scope
@@ -175,12 +174,11 @@ fn main() {
     }
 
     let mut dejavu_sets = DejavuSets::new(initial_analysis.scope.0.keys().collect::<Vec<_>>());
-    println!("{:?}", dejavu_sets);
 
     // Finding function pointers in global variables
     let fun_ptrs_types_in_globals = 
         find_function_pointer_types_in_globals(&dwarf_dict, &mut dejavu_sets);
-    println!("fun ptrs types in globals {:?}", fun_ptrs_types_in_globals);
+    //println!("fun ptrs types in globals {:?}", fun_ptrs_types_in_globals);
 
     // Find function types of indirect_targets
     let mut at_function_types = HashMap::new();
@@ -191,7 +189,7 @@ fn main() {
                                     &initial_analysis.indirect_targets));
     }
 
-    println!("AT function types {:#?}", at_function_types);
+    //println!("AT function types {:#?}", at_function_types);
 
 
     // Get DCG
@@ -221,9 +219,11 @@ fn do_pruning<'a, R: gimli::Reader<Offset = usize>>(
         prev_len = current_len;
         current_authorized_ATs.extend(find_authorized_ATs(dwarf_dict, dejavu_sets, &callgraph, initial_analysis, fun_ptrs_types_in_globals, &at_function_types));
 
+        println!("Adding to callgraph");
         for fun in &current_authorized_ATs {
             callgraph.extend(sysfilter::get_DCG(&initial_analysis.direct_edges, fun));
         }
+        println!("Done");
 
         current_len = current_authorized_ATs.len();
         println!("current_len = {} prev_len = {}", current_len, prev_len);
@@ -747,7 +747,7 @@ fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &D
         gimli::constants::DW_TAG_subroutine_type => {
             let function_type = DIE_to_function_type(dwarf, unit, entry);
             //println!("AAAAAAAAAAAAA {:?}", function_type);
-            return match function_type {
+            match function_type {
                 Ok(t) => { 
                     let mut set = HashSet::new();
                     set.insert(t); 
@@ -761,7 +761,6 @@ fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &D
             let mut function_types = HashSet::new();
             let mut tree = unit.entries_tree(Some(entry.offset())).unwrap();
             let root = tree.root().unwrap();
-            let mut attrs = root.entry().attrs();
             let mut children = root.children();
             // Iterate through members
             while let Some(child) = children.next().unwrap() {
@@ -1005,7 +1004,7 @@ fn find_all_function_pointers_types<R>(dwarfinfo_dict: &DwarfinfoDict<R>,
 
     for module_name in dwarfinfo_dict.0.keys() {
         let dwarf = &dwarfinfo_dict.0[module_name];
-        let mut dejavu = dejavu_sets.0.get_mut(module_name).unwrap();
+        let dejavu = dejavu_sets.0.get_mut(module_name).unwrap();
         // Iterate over the compilation units.
         let mut iter = dwarf.units();
         while let Some(header) = iter.next().unwrap() {
@@ -1049,7 +1048,7 @@ fn find_function_pointer_types_in_globals<R>(dwarfinfo_dict: &DwarfinfoDict<R>,
     for module_name in dwarfinfo_dict.0.keys() {
         println!("{}", module_name);
         let dwarf = &dwarfinfo_dict.0[module_name];
-        let mut dejavu = dejavu_sets.0.get_mut(module_name).unwrap();
+        let dejavu = dejavu_sets.0.get_mut(module_name).unwrap();
         // Iterate over the compilation units.
         let mut iter = dwarf.units();
         while let Some(header) = iter.next().unwrap() {
