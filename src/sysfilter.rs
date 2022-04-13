@@ -15,7 +15,7 @@ pub struct Module {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Scope(pub HashMap<String, Module>);
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Symbol {
     pub module: String,
     pub name:   String,
@@ -33,18 +33,19 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
                                   binary_path: &str,
                                   output_path: &str) -> InitialAnalysis {
     // Execute Sysfilter
+    /*
     Command::new(sysfilter_path)
         .args(["--full-json", "--arg-mode", "--dump-fcg", "-o", output_path, binary_path])
         .spawn()
         .expect("Failed to execute sysfilter")
         .wait().expect("Failed to wait for sysfilter");
+        */
     
     // Load the json output
     let json_data = load_json(output_path);
 
     // Deserialize the analysis scope
     let scope: Scope = serde_json::from_value(json_data["analysis_scope"].to_owned()).unwrap();
-    println!("{:#?}", scope);
 
     // Deserialize indirect targets
     let indirect_targets = &json_data["vacuum"]["analysis"]["all"]["callgraph"]["indirect_targets"]
@@ -96,15 +97,6 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
     let direct_edges = &json_data["vacuum"]["analysis"]["all"]["callgraph"]["direct_edges"]
         .as_object().unwrap();
 
-
-    /*
-    // Example of getting the DCG for a given root
-    let sym = Symbol {module: String::from("(executable)"), name: String::from("main")};
-    let dcg = get_DCG(direct_edges, sym);
-    println!("{:?}", dcg);
-    panic!();
-    */
-
     InitialAnalysis {
         scope: scope,
         indirect_targets: indirect_targets_vec,
@@ -127,7 +119,7 @@ fn get_DCG_rec_helper(direct_edges: &Map<String, Value>, root: String, DCG: &mut
     }
 }
 
-pub fn get_DCG_string(direct_edges: &Map<String, Value>, root: Symbol) -> HashSet<String> {
+pub fn get_DCG_string(direct_edges: &Map<String, Value>, root: &Symbol) -> HashSet<String> {
     let mut DCG = HashSet::new();
     DCG.insert(format!("{}@{}+0", root.module, root.name));
     for (fun, edges) in direct_edges {
@@ -136,7 +128,6 @@ pub fn get_DCG_string(direct_edges: &Map<String, Value>, root: Symbol) -> HashSe
         let function_name = tokens[1];
         if function_name == root.name && module_name == root.module {
             for fun in edges.as_array().unwrap() {
-                //println!("{}", fun);
                 get_DCG_rec_helper(direct_edges, fun.as_str().unwrap().to_owned(), &mut DCG);
             }
         }
@@ -145,7 +136,7 @@ pub fn get_DCG_string(direct_edges: &Map<String, Value>, root: Symbol) -> HashSe
 }
 
 
-pub fn get_DCG(direct_edges: &Map<String, Value>, root: Symbol) -> HashSet<Symbol> {
+pub fn get_DCG(direct_edges: &Map<String, Value>, root: &Symbol) -> HashSet<Symbol> {
     let mut DCG = HashSet::new();
     let dcg_string = get_DCG_string(direct_edges, root);
     for fun in dcg_string {
