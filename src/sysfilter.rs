@@ -1,4 +1,5 @@
-use std::fs;
+use std::fs::{self, File};
+use std::io::Write;
 use serde_json::{Value, Map};
 use serde::{Serialize, Deserialize};
 use std::process::Command;
@@ -25,8 +26,16 @@ pub struct Symbol {
 pub struct InitialAnalysis {
     pub scope: Scope,
     pub indirect_targets: HashSet<Symbol>,
+    pub indirect_targets_string: Vec<String>,
     pub thread_entry_points : Vec<Symbol>,
     pub direct_edges: Map<String, Value>,
+    pub syscalls: Vec<u64>
+}
+
+#[derive(Debug)]
+pub struct PrunedAnalysis {
+    pub syscalls: Vec<u64>,
+    pub indirect_targets: Vec<String>,
 }
 
 pub fn initial_sysfilter_analysis(sysfilter_path: &str,
@@ -39,7 +48,7 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
         .spawn()
         .expect("Failed to execute sysfilter")
         .wait().expect("Failed to wait for sysfilter");
-        */
+    */
     
     // Load the json output
     let json_data = load_json(output_path);
@@ -47,11 +56,18 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
     // Deserialize the analysis scope
     let scope: Scope = serde_json::from_value(json_data["analysis_scope"].to_owned()).unwrap();
 
+    // Get syscalls
+    let syscalls_json = json_data["syscalls"].as_array().unwrap();
+    let mut syscalls = vec!();
+    for x in syscalls_json {
+        syscalls.push(x.as_u64().unwrap());
+    }
+
     // Deserialize indirect targets
     let indirect_targets = &json_data["vacuum"]["analysis"]["all"]["callgraph"]["indirect_targets"]
         .as_array().unwrap();
 
-    let mut indirect_targets_vec = HashSet::new();
+    let mut indirect_targets_set = HashSet::new();
 
     for indirect_target in *indirect_targets {
         let indirect_target = indirect_target.as_str().unwrap().to_owned();
@@ -59,10 +75,19 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
         let module_name = tokens[0];
         let function_name = tokens[1];
 
-        indirect_targets_vec.insert(Symbol {
+        indirect_targets_set.insert(Symbol {
             module: module_name.to_owned(),
             name: function_name.to_owned(),
         });
+    }
+    
+    // Also a string version of the indirect targets for logging
+
+    let mut indirect_targets_str = vec!();
+
+    for indirect_target in *indirect_targets {
+        let indirect_target = indirect_target.as_str().unwrap().to_owned();
+        indirect_targets_str.push(indirect_target);
     }
 
     // Find thread entry points
@@ -97,11 +122,54 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
     let direct_edges = &json_data["vacuum"]["analysis"]["all"]["callgraph"]["direct_edges"]
         .as_object().unwrap();
 
+    println!("syscalls_len : {}", syscalls.len());
     InitialAnalysis {
         scope: scope,
-        indirect_targets: indirect_targets_vec,
+        indirect_targets: indirect_targets_set,
+        indirect_targets_string: indirect_targets_str,
         thread_entry_points,
         direct_edges: (*direct_edges).to_owned(),
+        syscalls,
+    }
+}
+
+pub fn pruned_sysfilter_analysis(sysfilter_path: &str,
+                                  binary_path: &str,
+                                  output_path: &str,
+                                  authorized_fct_path: &str) -> PrunedAnalysis 
+{
+    // Execute Sysfilter
+    /*
+    Command::new(sysfilter_path)
+        .args(["--full-json", "--dump-fcg", "--atpruned-fcg", "--pruned-ATs-file", authorized_fct_path, "-o", output_path, binary_path])
+        .spawn()
+        .expect("Failed to execute sysfilter with pruning")
+        .wait().expect("Failed to wait for sysfilter (with pruning)");
+        */
+
+    // Load the json output
+    let json_data = load_json(output_path);
+    // Get syscalls
+    let syscalls_json = json_data["syscalls"].as_array().unwrap();
+
+    let mut syscalls = vec!();
+    for x in syscalls_json {
+        syscalls.push(x.as_u64().unwrap());
+    }
+
+    let indirect_targets = &json_data["init"]["analysis"]["all"]["callgraph"]["indirect_targets"]
+        .as_array().unwrap();
+    
+    let mut indirect_targets_vec = vec!();
+
+    for indirect_target in *indirect_targets {
+        let indirect_target = indirect_target.as_str().unwrap().to_owned();
+        indirect_targets_vec.push(indirect_target);
+    }
+
+    PrunedAnalysis {
+        syscalls,
+        indirect_targets: indirect_targets_vec,
     }
 }
 
@@ -156,4 +224,18 @@ fn load_json(path: &str) -> Value {
     let data = fs::read_to_string(path).expect("Failed to read json file");
     let json_data: Value = serde_json::from_str(&data).expect("Failed to decode json");
     return json_data;
+}
+
+pub fn write_authorized_functions_json(json_name: &str, fun_set: &HashSet<Symbol>) {
+    let mut file = File::create(json_name)
+        .expect("Failed to create authorized ATs json file");
+    file.write_all(b"[").unwrap();
+    for (i, fun) in fun_set.iter().enumerate() {
+        write!(file, "{{\"module\": \"module-{}\", \"function\" : \"{}\"}}", fun.module, fun.name)
+            .unwrap();
+        if i != fun_set.len() - 1 {
+            file.write_all(b", ").unwrap();
+        }
+    }
+    file.write_all(b"]").unwrap();
 }

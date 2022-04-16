@@ -6,6 +6,8 @@ use std::collections::{HashMap, HashSet};
 use std::{borrow, env, fs};
 use std::borrow::Cow;
 use std::process::Command;
+use std::fs::File;
+use std::io::Write;
 
 use gimli::{Dwarf, Reader, Unit, UnitOffset};
 use gimli::DebuggingInformationEntry;
@@ -13,7 +15,7 @@ use gimli::EndianSlice;
 
 use memmap::Mmap;
 
-use sysfilter_pruning::sysfilter::{self, Symbol, InitialAnalysis};
+use sysfilter_pruning::sysfilter::{self, Symbol, InitialAnalysis, PrunedAnalysis};
 
 /// Dwarf info of each module
 #[derive(Debug)]
@@ -45,13 +47,10 @@ impl VariableType {
 enum TypeToken {
     /// A name e.g int
     Name(String),
-    ///
-    Union,
-    ///
+    //Union,
     Pointer,
     Const,
-    Enum,
-    ///
+    //Enum,
     Void,
     Function(FunctionType)
 }
@@ -80,8 +79,8 @@ fn main() {
     if args.len() != 4 {
         println!("Usage: {} <sysfilter_path> <output_path> <binary_path>", args[0]);
         return;
-
     }
+
     let sysfilter_path = &args[1];
     let output_path  = &args[2]; 
     let binary_path = &args[3]; 
@@ -191,12 +190,77 @@ fn main() {
 
     //println!("AT function types {:#?}", at_function_types);
 
+    let mut results = HashMap::new();
 
-    // Get DCG
-    let sym = Symbol {module: String::from("(executable)"), name: String::from("qsdf")};
-    let authorized_ATs = do_pruning(&dwarf_dict, &mut dejavu_sets, &sym, &initial_analysis, &fun_ptrs_types_in_globals, &at_function_types);
+    let entry = Symbol {module: String::from("libc.so.6"), name: String::from("__libc_start_main")};
+    println!("Entry point : {:?}", entry);
+    let res = analyze_one_entry_point(&dwarf_dict, &mut dejavu_sets, &entry, &initial_analysis, &fun_ptrs_types_in_globals, &at_function_types, binary_path, sysfilter_path);
+    println!("Syscalls len {}", res.syscalls.len());
+    results.insert(entry, res);
 
-    println!("{}", initial_analysis.indirect_targets.len())
+    for thread_entry in &initial_analysis.thread_entry_points {
+        println!("Entry point : {:?}", thread_entry);
+        let res = analyze_one_entry_point(&dwarf_dict, &mut dejavu_sets, thread_entry, &initial_analysis, &fun_ptrs_types_in_globals, &at_function_types, binary_path, sysfilter_path);
+        println!("Syscalls len {}", res.syscalls.len());
+        results.insert(thread_entry.clone(), res);
+    }
+
+    let mut file = File::create(output_path).expect("Failed to create output file");
+
+    write!(file, "{{\n").unwrap();
+    // Log info of no pruning
+
+    write!(file, "\"No_Pruning\" : \n").unwrap();
+    write!(file, "{{").unwrap();
+    write!(file, "\"syscalls_len\" : {},\n", initial_analysis.syscalls.len()).unwrap();
+    write!(file, "\"indirect_targets_len\" : {},\n", initial_analysis.indirect_targets_string.len()).unwrap();
+    write!(file, "\"syscalls\" : {:?},\n", initial_analysis.syscalls).unwrap();
+    write!(file, "\"indirect_targets\" : {:?}\n", initial_analysis.indirect_targets_string).unwrap();
+    write!(file, "}}").unwrap();
+    write!(file, ",\n").unwrap();
+
+    // Rest of the log
+    let mut i = 0;
+    for (entry, res) in &results {
+        let entry_point = format!("{}@{}", entry.name, entry.module);
+        write!(file, "\"{}\" : \n", entry_point).unwrap();
+        write!(file, "{{").unwrap();
+        write!(file, "\"syscalls_len\" : {},\n", res.syscalls.len()).unwrap();
+        write!(file, "\"indirect_targets_len\" : {},\n", res.indirect_targets.len()).unwrap();
+        write!(file, "\"syscalls\" : {:?},\n", res.syscalls).unwrap();
+        write!(file, "\"indirect_targets\" : {:?}\n", res.indirect_targets).unwrap();
+        write!(file, "}}").unwrap();
+        if i != results.len() - 1 {
+            write!(file, ",\n").unwrap();
+        }
+        i += 1;
+    }
+    write!(file, "\n}}").unwrap();
+}
+
+fn analyze_one_entry_point<'a, R: gimli::Reader<Offset = usize>>(
+    dwarf_dict: &'a DwarfinfoDict<R>,
+    dejavu_sets: &'a mut DejavuSets,
+    entry: &Symbol,
+    initial_analysis: &'a InitialAnalysis,
+    fun_ptrs_types_in_globals: &'a HashSet<FunctionType>,
+    at_function_types: &'a HashMap<Symbol, Option<FunctionType>>,
+    binary_path: &str,
+    sysfilter_path: &str) 
+-> PrunedAnalysis {
+    let authorized_ATs = do_pruning(dwarf_dict, dejavu_sets, entry, initial_analysis, 
+                                    fun_ptrs_types_in_globals, at_function_types);
+
+    println!("{}", initial_analysis.indirect_targets.len());
+
+    let binary_name = binary_path.split('/').collect::<Vec<_>>();
+    let authorized_fct_path = format!("{}_{}{}", binary_name.last().unwrap(), 
+                                      entry.name, "_ATs.json");
+    let output_path = format!("{}_{}{}", binary_name.last().unwrap(), entry.name, "_pruned.json");
+    sysfilter::write_authorized_functions_json(&authorized_fct_path, &authorized_ATs);
+    let pruned_results = sysfilter::pruned_sysfilter_analysis(sysfilter_path, binary_path, 
+                                         &output_path, &authorized_fct_path);
+    return pruned_results;
 }
 
 
@@ -209,8 +273,18 @@ fn do_pruning<'a, R: gimli::Reader<Offset = usize>>(
     at_function_types: &'a HashMap<Symbol, Option<FunctionType>>) 
 -> HashSet<Symbol>{
 
+    // Get DCG
     let mut callgraph = sysfilter::get_DCG(&initial_analysis.direct_edges, entry);
     let mut current_authorized_ATs = HashSet::new();
+    
+    // If the entry point is __libc_start_main we explicitly add main as an authorized AT
+    if entry.name == "__libc_start_main" {
+        current_authorized_ATs.insert(
+            Symbol {
+                module: String::from("(executable)"),
+                name: String::from("main"),
+            });
+    }
 
     let mut current_len = 0;
     let mut prev_len = 1;
@@ -219,11 +293,9 @@ fn do_pruning<'a, R: gimli::Reader<Offset = usize>>(
         prev_len = current_len;
         current_authorized_ATs.extend(find_authorized_ATs(dwarf_dict, dejavu_sets, &callgraph, initial_analysis, fun_ptrs_types_in_globals, &at_function_types));
 
-        println!("Adding to callgraph");
         for fun in &current_authorized_ATs {
             callgraph.extend(sysfilter::get_DCG(&initial_analysis.direct_edges, fun));
         }
-        println!("Done");
 
         current_len = current_authorized_ATs.len();
         println!("current_len = {} prev_len = {}", current_len, prev_len);
@@ -245,7 +317,7 @@ fn find_authorized_ATs<'a, R: gimli::Reader<Offset = usize>>(
     at_function_types: &'a HashMap<Symbol, Option<FunctionType>>) 
 -> HashSet<Symbol>{
 
-    let mut all_fun_ptrs_types = find_all_function_pointers_types(&dwarf_dict,
+    let all_fun_ptrs_types = find_all_function_pointers_types(&dwarf_dict,
                                                                   dejavu_sets,
                                                                   &callgraph);
 
@@ -391,7 +463,7 @@ fn type_DIE_to_type<R: gimli::Reader<Offset = usize>>(dwarf: &Dwarf<R>,
                     //let restricted_type_DIE = get_DIE_at_offset(dwarf, unit, &at_type_value);
                     //let mut restricted_type_type = type_DIE_to_type(dwarf, unit, &restricted_type_DIE)?;
                     let (new_unit, off) = unit_containing(dwarf, &at_type_value).unwrap();
-                    let mut restricted_type_type = if let Some(u) = new_unit {
+                    let restricted_type_type = if let Some(u) = new_unit {
                         let restricted_type_DIE = u.entry(UnitOffset(off))
                             .expect("Did not find entry at offset");
                         type_DIE_to_type(dwarf, &u, &restricted_type_DIE)?
@@ -570,7 +642,7 @@ fn DIE_to_function_type<R: gimli::Reader<Offset = usize>>(dwarf: &Dwarf<R>,
     let mut tree = unit.entries_tree(Some(entry.offset())).unwrap();
     let root = tree.root().unwrap();
 
-    let mut attrs = root.entry().attrs();
+    //let attrs = root.entry().attrs();
 
     let return_type = DIE_to_type(dwarf, unit, root.entry())?;
     //println!("Return type : {:?}", return_type);
@@ -607,10 +679,8 @@ fn find_all_function_types<R>(dwarf: &Dwarf<R>, module_name: &str, indirect_targ
     let mut iter = dwarf.units();
     while let Some(header) = iter.next().unwrap() {
         let unit = dwarf.unit(header).unwrap();
-        let mut depth = 0;
         let mut entries = unit.entries();
-        while let Some((delta_depth, entry)) = entries.next_dfs().unwrap() {
-            depth += delta_depth;
+        while let Some((_delta_depth, entry)) = entries.next_dfs().unwrap() {
             if entry.tag() == gimli::constants::DW_TAG_subprogram {
                 if let Some(name_value) = entry.attr_value(gimli::constants::DW_AT_name).unwrap() {
                     if let Some(curr_function_name) = decode_string(dwarf, &name_value) {
@@ -663,10 +733,8 @@ where R: Reader<Offset = usize>, <R as Reader>::Offset: LowerHex {
         let unit = dwarf.unit(header).unwrap();
 
         // Iterate over the Debugging Information Entries (DIEs) in the unit.
-        let mut depth = 0;
         let mut entries = unit.entries();
-        while let Some((delta_depth, entry)) = entries.next_dfs().unwrap() {
-            depth += delta_depth;
+        while let Some((_delta_depth, entry)) = entries.next_dfs().unwrap() {
             if entry.tag() == gimli::constants::DW_TAG_subprogram {
                 //println!("<{}><{:x}> {}", depth, entry.offset().0, entry.tag());
                 // Should this be attr_value_raw?
@@ -959,10 +1027,8 @@ fn find_function_pointers_types<R>(dwarf: &Dwarf<R>, function_name: &str, dejavu
         let unit = dwarf.unit(header).unwrap();
 
         // Iterate over the Debugging Information Entries (DIEs) in the unit.
-        let mut depth = 0;
         let mut entries = unit.entries();
-        while let Some((delta_depth, entry)) = entries.next_dfs().unwrap() {
-            depth += delta_depth;
+        while let Some((_delta_depth, entry)) = entries.next_dfs().unwrap() {
             if entry.tag() == gimli::constants::DW_TAG_subprogram {
                 // Should this be attr_value_raw?
                 if let Some(name_value) = entry.attr_value(gimli::constants::DW_AT_name).unwrap() {
@@ -1011,12 +1077,10 @@ fn find_all_function_pointers_types<R>(dwarfinfo_dict: &DwarfinfoDict<R>,
             let unit = dwarf.unit(header).unwrap();
 
             // Iterate over the Debugging Information Entries (DIEs) in the unit.
-            let mut depth = 0;
             let mut entries = unit.entries();
             // Maybe unnecessary to traverse in DFS
             // We can stay at depth 1
-            while let Some((delta_depth, entry)) = entries.next_dfs().unwrap() {
-                depth += delta_depth;
+            while let Some((_delta_depth, entry)) = entries.next_dfs().unwrap() {
                 if entry.tag() == gimli::constants::DW_TAG_subprogram {
                     // Should this be attr_value_raw?
                     if let Some(name_value) = entry.attr_value(gimli::constants::DW_AT_name).unwrap() {
@@ -1052,13 +1116,6 @@ fn find_function_pointer_types_in_globals<R>(dwarfinfo_dict: &DwarfinfoDict<R>,
         // Iterate over the compilation units.
         let mut iter = dwarf.units();
         while let Some(header) = iter.next().unwrap() {
-            let cu_off = match header.offset() {
-                gimli::UnitSectionOffset::DebugInfoOffset(gimli::DebugInfoOffset(cu_offset)) => {
-                    cu_offset
-                }
-                _ => {panic!("Could not handle offset");}
-            };
-
             let unit = dwarf.unit(header).unwrap();
 
             // Iterate over the Debugging Information Entries (DIEs) in the unit.
@@ -1076,78 +1133,10 @@ fn find_function_pointer_types_in_globals<R>(dwarfinfo_dict: &DwarfinfoDict<R>,
                                                           &unit,
                                                           entry,
                                                           dejavu));
-                    //println!("{:?}", fct_ptrs_types);
                 }
             }
         }
     }
 
     fct_ptrs_types
-}
-
-fn dump_file(object: &object::File, endian: gimli::RunTimeEndian) -> Result<(), gimli::Error> {
-    // Load a section and return as `Cow<[u8]>`.
-    let load_section = |id: gimli::SectionId| -> Result<borrow::Cow<[u8]>, gimli::Error> {
-        match object.section_by_name(id.name()) {
-            Some(ref section) => Ok(section
-                .uncompressed_data()
-                .unwrap_or(borrow::Cow::Borrowed(&[][..]))),
-            None => Ok(borrow::Cow::Borrowed(&[][..])),
-        }
-    };
-
-    // Load all of the sections.
-    let dwarf_cow = gimli::Dwarf::load(&load_section)?;
-
-    // Borrow a `Cow<[u8]>` to create an `EndianSlice`.
-    let borrow_section: &dyn for<'a> Fn(
-        &'a borrow::Cow<[u8]>,
-    ) -> gimli::EndianSlice<'a, gimli::RunTimeEndian> =
-        &|section| gimli::EndianSlice::new(&*section, endian);
-
-    // Create `EndianSlice`s for all of the sections.
-    let dwarf = dwarf_cow.borrow(&borrow_section);
-
-    // Iterate over the compilation units.
-    let mut iter = dwarf.units();
-    while let Some(header) = iter.next()? {
-        /*
-        println!(
-            "Unit at <.debug_info+0x{:x}>",
-            header.offset().as_debug_info_offset().unwrap().0
-        );*/
-        let unit = dwarf.unit(header)?;
-
-        // Iterate over the Debugging Information Entries (DIEs) in the unit.
-        let mut depth = 0;
-        let mut entries = unit.entries();
-        while let Some((delta_depth, entry)) = entries.next_dfs()? {
-            depth += delta_depth;
-            //println!("<{}><{:x}> {}", depth, entry.offset().0, entry.tag());
-
-            // Iterate over the attributes in the DIE.
-            let mut attrs = entry.attrs();
-            while let Some(attr) = attrs.next()? {
-                println!("   {}: {:?}", attr.name(), attr.value());
-                match attr.value() {
-                    gimli::AttributeValue::DebugStrOffsetsBase(base) => {
-                        panic!("BLI");
-                    }
-                    gimli::AttributeValue::DebugStrOffsetsIndex(index) => {
-                        panic!("BLA");
-                    }
-                    gimli::AttributeValue::DebugStrRef(offset) => {
-                        println!("BLO");
-						if let Ok(s) = dwarf.debug_str.get_str(offset) {
-							println!("{}", s.to_string_lossy());
-						} else {
-							println!("<.debug_str+0x{:08x}>", offset.0);
-						}
-                    }
-                    _ => (),
-                }
-            }
-        }
-    }
-    Ok(())
 }
