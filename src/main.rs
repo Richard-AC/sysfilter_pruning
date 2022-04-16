@@ -86,7 +86,7 @@ fn main() {
     let binary_path = &args[3]; 
 
     let binary_name = binary_path.split('/').collect::<Vec<_>>();
-    let output_json = format!("{}{}", binary_name.last().unwrap(), ".json");
+    let output_json = format!("{}{}", binary_name.last().unwrap(), "_sysfilter.json");
 
     let initial_analysis = sysfilter::initial_sysfilter_analysis(
         sysfilter_path,
