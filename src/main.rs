@@ -607,6 +607,7 @@ fn DIE_to_type<R: gimli::Reader<Offset = usize>>(dwarf: &Dwarf<R>,
             },
             _ => {
                 println!("{:?}", at_type_value);
+                return Err(());
                 panic!("Unknown DW_AT_type value");
             }
         };
