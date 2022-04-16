@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 use std::fs::{self, File};
 use std::io::Write;
 use serde_json::{Value, Map};
@@ -42,13 +44,11 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
                                   binary_path: &str,
                                   output_path: &str) -> InitialAnalysis {
     // Execute Sysfilter
-    /*
     Command::new(sysfilter_path)
         .args(["--full-json", "--arg-mode", "--dump-fcg", "-o", output_path, binary_path])
         .spawn()
         .expect("Failed to execute sysfilter")
         .wait().expect("Failed to wait for sysfilter");
-    */
     
     // Load the json output
     let json_data = load_json(output_path);
@@ -122,7 +122,6 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
     let direct_edges = &json_data["vacuum"]["analysis"]["all"]["callgraph"]["direct_edges"]
         .as_object().unwrap();
 
-    println!("syscalls_len : {}", syscalls.len());
     InitialAnalysis {
         scope: scope,
         indirect_targets: indirect_targets_set,
@@ -139,13 +138,11 @@ pub fn pruned_sysfilter_analysis(sysfilter_path: &str,
                                   authorized_fct_path: &str) -> PrunedAnalysis 
 {
     // Execute Sysfilter
-    /*
     Command::new(sysfilter_path)
         .args(["--full-json", "--dump-fcg", "--atpruned-fcg", "--pruned-ATs-file", authorized_fct_path, "-o", output_path, binary_path])
         .spawn()
         .expect("Failed to execute sysfilter with pruning")
         .wait().expect("Failed to wait for sysfilter (with pruning)");
-        */
 
     // Load the json output
     let json_data = load_json(output_path);

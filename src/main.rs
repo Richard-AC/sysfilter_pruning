@@ -102,7 +102,6 @@ fn main() {
             panic!("No symbols for {}", module_name);
         }
         println!("Loading dwarf of {}", module_name);
-        let path = &scope_entry.path;
 
         // Separate debug info can be in many places
         // We use gdb to find it for us
@@ -251,8 +250,6 @@ fn analyze_one_entry_point<'a, R: gimli::Reader<Offset = usize>>(
     let authorized_ATs = do_pruning(dwarf_dict, dejavu_sets, entry, initial_analysis, 
                                     fun_ptrs_types_in_globals, at_function_types);
 
-    println!("{}", initial_analysis.indirect_targets.len());
-
     let binary_name = binary_path.split('/').collect::<Vec<_>>();
     let authorized_fct_path = format!("{}_{}{}", binary_name.last().unwrap(), 
                                       entry.name, "_ATs.json");
@@ -291,14 +288,14 @@ fn do_pruning<'a, R: gimli::Reader<Offset = usize>>(
 
     while current_len != prev_len {
         prev_len = current_len;
-        current_authorized_ATs.extend(find_authorized_ATs(dwarf_dict, dejavu_sets, &callgraph, initial_analysis, fun_ptrs_types_in_globals, &at_function_types));
+        current_authorized_ATs.extend(find_authorized_ATs(dwarf_dict, dejavu_sets, &callgraph, fun_ptrs_types_in_globals, &at_function_types));
 
         for fun in &current_authorized_ATs {
             callgraph.extend(sysfilter::get_DCG(&initial_analysis.direct_edges, fun));
         }
 
         current_len = current_authorized_ATs.len();
-        println!("current_len = {} prev_len = {}", current_len, prev_len);
+        //println!("current_len = {} prev_len = {}", current_len, prev_len);
     }
 
 
@@ -312,7 +309,6 @@ fn find_authorized_ATs<'a, R: gimli::Reader<Offset = usize>>(
     dwarf_dict: &'a DwarfinfoDict<R>,
     dejavu_sets: &'a mut DejavuSets,
     callgraph: &HashSet<Symbol>,
-    initial_analysis: &'a InitialAnalysis,
     fun_ptrs_types_in_globals: &'a HashSet<FunctionType>,
     at_function_types: &'a HashMap<Symbol, Option<FunctionType>>) 
 -> HashSet<Symbol>{
@@ -324,8 +320,8 @@ fn find_authorized_ATs<'a, R: gimli::Reader<Offset = usize>>(
     //println!("fun ptrs type set {:?}", all_fun_ptrs_types);
 
     let mut pruned_AT_set = HashSet::new();
-    let mut yes = 0;
-    let mut no = 0;
+    //let mut yes = 0;
+    //let mut no = 0;
     for (fun, fun_type) in at_function_types {
         //println!("{:?}", fun_type);
         match fun_type {
@@ -334,37 +330,21 @@ fn find_authorized_ATs<'a, R: gimli::Reader<Offset = usize>>(
                     || fun_ptrs_types_in_globals.contains(&fun_type) {
                     pruned_AT_set.insert(fun.clone());
                     //println!("YES");
-                    yes += 1;
+                    //yes += 1;
                 } else {
                     //println!("NO");
-                    no += 1;
+                    //no += 1;
                 }
             }
             None => {
                 pruned_AT_set.insert(fun.clone());
                 //println!("YES {:?}", fun);
-                yes += 1;
+                //yes += 1;
             }
         }
     }
-    println!("yes : {} no: {}", yes, no);
+    //println!("yes : {} no: {}", yes, no);
     return pruned_AT_set;
-}
-
-
-
-/// Returns the DIE at the offset represented by the attribute value off
-fn get_DIE_at_offset<'a, R: gimli::Reader>(dwarf: &'a gimli::Dwarf<R>, unit: &'a Unit<R>, offset: &gimli::AttributeValue<R>) 
--> DebuggingInformationEntry<'a, 'a, R> {
-    match offset {
-        gimli::AttributeValue::UnitRef(UnitOffset(off)) => {
-            { return unit.entry(UnitOffset(*off)).expect("Did not find entry at offset"); }
-        }
-        _ => {
-            println!("{:?}", offset);
-            panic!("Invalid offset {:?}", offset);
-        }
-    };
 }
 
 /// Return a VariableType from a type DIE 
@@ -541,10 +521,10 @@ fn unit_containing<R: gimli::Reader<Offset = usize>>(dwarf: &Dwarf<R>,
 
                 let unit = dwarf.unit(header).unwrap();
                 let mut entries = unit.entries();
-                while let Some((delta_depth, entry)) = entries.next_dfs().unwrap() {
+                while let Some((_delta_depth, entry)) = entries.next_dfs().unwrap() {
                     let entry_off = match entry.offset() {
                         gimli::UnitOffset(e) => e,
-                        _ => panic!("Could not handle entry offset {:?}", entry.offset())
+                        //_ => panic!("Could not handle entry offset {:?}", entry.offset())
                     };
                     /*
                     println!("{:?}, ", entry.offset());
@@ -602,10 +582,10 @@ fn DIE_to_type<R: gimli::Reader<Offset = usize>>(dwarf: &Dwarf<R>,
                     let unit = dwarf.unit(header).unwrap();
                     // Iterate over the Debugging Information Entries (DIEs) in the unit.
                     let mut entries = unit.entries();
-                    while let Some((delta_depth, entry)) = entries.next_dfs().unwrap() {
+                    while let Some((_delta_depth, entry)) = entries.next_dfs().unwrap() {
                         let entry_off = match entry.offset() {
                             gimli::UnitOffset(e) => e,
-                            _ => panic!("Could not handle entry offset {:?}", entry.offset())
+                            //_ => panic!("Could not handle entry offset {:?}", entry.offset())
                         };
                         /*
                         println!("{:?}, ", entry.offset());
@@ -717,6 +697,7 @@ fn find_all_function_types<R>(dwarf: &Dwarf<R>, module_name: &str, indirect_targ
     return all_function_types;
 }
 
+/*
 /// Find the function type of a function 
 fn find_function_type<R>(dwarf: &Dwarf<R>, function_name: &str) -> Result<FunctionType, ()> 
 where R: Reader<Offset = usize>, <R as Reader>::Offset: LowerHex {
@@ -768,7 +749,7 @@ where R: Reader<Offset = usize>, <R as Reader>::Offset: LowerHex {
         }
     }
     Err(())
-}
+}*/
 
 fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &DebuggingInformationEntry<R>, dejavu: &mut HashSet<usize>) 
 -> HashSet<FunctionType> where R: Reader<Offset = usize>, <R as Reader>::Offset: LowerHex {
@@ -1017,50 +998,6 @@ fn find_function_pointers<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &Debugging
 
 /// Given a function name, find all the function pointer types present in that function
 /// In local variables, parameters and function return value
-fn find_function_pointers_types<R>(dwarf: &Dwarf<R>, function_name: &str, dejavu: &mut HashSet<usize>) 
--> HashSet<FunctionType> where R: Reader<Offset = usize>, <R as Reader>::Offset: LowerHex {
-    println!("\nAZERAZERAZERAZERAZERAZERAZERAZERAZERAZERAZER\n");
-
-    // Iterate over the compilation units.
-    let mut iter = dwarf.units();
-    while let Some(header) = iter.next().unwrap() {
-        let unit = dwarf.unit(header).unwrap();
-
-        // Iterate over the Debugging Information Entries (DIEs) in the unit.
-        let mut entries = unit.entries();
-        while let Some((_delta_depth, entry)) = entries.next_dfs().unwrap() {
-            if entry.tag() == gimli::constants::DW_TAG_subprogram {
-                // Should this be attr_value_raw?
-                if let Some(name_value) = entry.attr_value(gimli::constants::DW_AT_name).unwrap() {
-                    //println!("{:?}", name_value);
-                    if let Some(curr_function_name) = match name_value {
-                        gimli::AttributeValue::DebugStrRef(offset) => {
-                            if let Ok(s) = dwarf.debug_str.get_str(offset) {
-                                let curr_function_name = s.to_string_lossy().unwrap().to_string();
-                                Some(curr_function_name)
-                            } else {
-                                None
-                            }
-                        },
-                        gimli::AttributeValue::String(s) => {
-                            let curr_function_name = s.to_string_lossy().unwrap().to_string();
-                            Some(curr_function_name)
-                        }
-                        _ => {panic!("Can't read name value");}
-                    } {
-                        if curr_function_name == function_name {
-                            return find_function_pointers(dwarf, &unit, entry, dejavu);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    HashSet::new()
-}
-
-/// Given a function name, find all the function pointer types present in that function
-/// In local variables, parameters and function return value
 fn find_all_function_pointers_types<R>(dwarfinfo_dict: &DwarfinfoDict<R>, 
                                        dejavu_sets: &mut DejavuSets,
                                        callgraph: &HashSet<Symbol>) 
@@ -1110,7 +1047,6 @@ fn find_function_pointer_types_in_globals<R>(dwarfinfo_dict: &DwarfinfoDict<R>,
 -> HashSet<FunctionType> where R: Reader<Offset = usize> + std::cmp::PartialEq, <R as Reader>::Offset: LowerHex {
     let mut fct_ptrs_types = HashSet::new();
     for module_name in dwarfinfo_dict.0.keys() {
-        println!("{}", module_name);
         let dwarf = &dwarfinfo_dict.0[module_name];
         let dejavu = dejavu_sets.0.get_mut(module_name).unwrap();
         // Iterate over the compilation units.
