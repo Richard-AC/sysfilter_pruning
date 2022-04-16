@@ -819,7 +819,10 @@ fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &D
                 let at_type_value = child.entry().attr_value(gimli::constants::DW_AT_type)
                     .unwrap().expect("This local var or parameter has no type");
                 //let member_type_DIE = get_DIE_at_offset(dwarf, unit, &at_type_value);
-                let (new_unit, off) = unit_containing(dwarf, &at_type_value).unwrap();
+                let (new_unit, off) = match unit_containing(dwarf, &at_type_value) {
+                    Some((u, o)) => (u, o),
+                    None => {return HashSet::new();}
+                };
                 let fct_ptrs = if let Some(u) = new_unit {
                     let member_type_DIE = u.entry(UnitOffset(off))
                         .expect("Did not find entry at offset");
