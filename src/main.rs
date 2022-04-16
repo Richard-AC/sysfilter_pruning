@@ -359,7 +359,10 @@ fn type_DIE_to_type<R: gimli::Reader<Offset = usize>>(dwarf: &Dwarf<R>,
         | gimli::constants::DW_TAG_enumeration_type 
         | gimli::constants::DW_TAG_structure_type => {
             if let Some(at_name_value) = entry.attr_value(gimli::constants::DW_AT_name).unwrap() {
-                let type_string = decode_string(dwarf, &at_name_value).unwrap();
+                let type_string = match decode_string(dwarf, &at_name_value) {
+                    Some(s) => s,
+                    None => {return Err(());},
+                };
                 return Ok(VariableType (vec![TypeToken::Name(type_string)]));
             }
         },
@@ -608,7 +611,7 @@ fn DIE_to_type<R: gimli::Reader<Offset = usize>>(dwarf: &Dwarf<R>,
             _ => {
                 println!("{:?}", at_type_value);
                 return Err(());
-                panic!("Unknown DW_AT_type value");
+                //panic!("Unknown DW_AT_type value");
             }
         };
     }
