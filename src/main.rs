@@ -370,7 +370,10 @@ fn type_DIE_to_type<R: gimli::Reader<Offset = usize>>(dwarf: &Dwarf<R>,
                 None => {return Ok(VariableType (vec![TypeToken::Pointer, TypeToken::Void]));}
                 Some(at_type_value) => { 
                     //let pointed_type_DIE = get_DIE_at_offset(dwarf, unit, &at_type_value);
-                    let (new_unit, off) = unit_containing(dwarf, &at_type_value).unwrap();
+                    let (new_unit, off) = match unit_containing(dwarf, &at_type_value) {
+                        Some((u, o)) => (u, o),
+                        None => {return Err(());}
+                    };
                     let mut pointed_type_type = if let Some(u) = new_unit {
                         let pointed_type_DIE = u.entry(UnitOffset(off))
                             .expect("Did not find entry at offset");
@@ -856,7 +859,10 @@ fn find_function_pointers_in_variable <R>(dwarf: &Dwarf<R>,
     let at_type_value = entry.attr_value(gimli::constants::DW_AT_type)
         .unwrap().expect("This local var or parameter has no type");
     //let pointed_type_DIE = get_DIE_at_offset(dwarf, unit, &at_type_value);
-    let (new_unit, off) = unit_containing(dwarf, &at_type_value).unwrap();
+    let (new_unit, off) = match unit_containing(dwarf, &at_type_value) {
+        Some((u, o)) => (u, o),
+        None => {return HashSet::new();}
+    };
     if let Some(u) = new_unit {
         let pointed_type_DIE = u.entry(UnitOffset(off))
             .expect("Did not find entry at offset");
@@ -898,7 +904,10 @@ fn find_function_pointers_in_callsite<R>(dwarf: &Dwarf<R>,
             return HashSet::new();
         };
     //let subprogram_DIE = get_DIE_at_offset(dwarf, unit, &abstract_origin);
-    let (new_unit, off) = unit_containing(dwarf, &abstract_origin).unwrap();
+    let (new_unit, off) = match unit_containing(dwarf, &abstract_origin) {
+        Some((u, o)) => (u, o),
+        None => {return HashSet::new();}
+    };
     if let Some(u) = new_unit {
         let subprogram_DIE = u.entry(UnitOffset(off))
             .expect("Did not find entry at offset");
@@ -911,7 +920,10 @@ fn find_function_pointers_in_callsite<R>(dwarf: &Dwarf<R>,
             Some(at_type_value) => { 
                 //let return_value_type_DIE = get_DIE_at_offset(dwarf, unit, &at_type_value);
                 //return find_function_pointers_in_type(dwarf, unit, &return_value_type_DIE, dejavu);
-                let (new_unit, off) = unit_containing(dwarf, &at_type_value).unwrap();
+                let (new_unit, off) = match unit_containing(dwarf, &at_type_value) {
+                    Some((u, o)) => (u, o),
+                    None => {return HashSet::new();}
+                };
                 if let Some(u) = new_unit {
                     let return_value_type_DIE = u.entry(UnitOffset(off))
                         .expect("Did not find entry at offset");
@@ -935,7 +947,10 @@ fn find_function_pointers_in_callsite<R>(dwarf: &Dwarf<R>,
             Some(at_type_value) => { 
                 //let return_value_type_DIE = get_DIE_at_offset(dwarf, unit, &at_type_value);
                 //return find_function_pointers_in_type(dwarf, unit, &return_value_type_DIE, dejavu);
-                let (new_unit, off) = unit_containing(dwarf, &at_type_value).unwrap();
+                let (new_unit, off) = match unit_containing(dwarf, &at_type_value) {
+                    Some((u, o)) => (u, o),
+                    None => {return HashSet::new();}
+                };
                 if let Some(u) = new_unit {
                     let return_value_type_DIE = u.entry(UnitOffset(off))
                         .expect("Did not find entry at offset");
