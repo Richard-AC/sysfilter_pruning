@@ -797,6 +797,7 @@ fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &D
         | gimli::constants::DW_TAG_array_type
         | gimli::constants::DW_TAG_restrict_type
         | gimli::constants::DW_TAG_const_type
+        | gimli::constants::DW_TAG_rvalue_reference_type
         | gimli::constants::DW_TAG_atomic_type
         | gimli::constants::DW_TAG_volatile_type
         | gimli::constants::DW_TAG_typedef => {
