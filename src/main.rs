@@ -313,6 +313,17 @@ fn find_authorized_ATs<'a, R: gimli::Reader<Offset = usize>>(
     at_function_types: &'a HashMap<Symbol, Option<FunctionType>>) 
 -> HashSet<Symbol>{
 
+    // DEBUG
+    /*
+    let sym = Symbol { module: String::from("libgnutls.so.30"), name: String::from("gnutls_x509_crl_init") };
+    let mut syms = HashSet::new();
+    syms.insert(sym);
+    find_all_function_pointers_types(&dwarf_dict, dejavu_sets, &syms);
+    panic!("Debug");
+    */
+    // /DEBU"G
+
+
     let all_fun_ptrs_types = find_all_function_pointers_types(&dwarf_dict,
                                                                   dejavu_sets,
                                                                   &callgraph);
@@ -441,7 +452,12 @@ fn type_DIE_to_type<R: gimli::Reader<Offset = usize>>(dwarf: &Dwarf<R>,
             }
         } */
 
-        gimli::constants::DW_TAG_restrict_type => {
+        // volatile and restrict are not strictly enforced by the compiler.
+        // It is possible to call a function which takes a restrict pointer
+        // with a non restrict pointer. Therefore we ignore those keyword and only
+        // return the underlying type.
+        gimli::constants::DW_TAG_restrict_type
+        | gimli::constants::DW_TAG_volatile_type => {
             match entry.attr_value(gimli::constants::DW_AT_type).unwrap() {
                 // restrict void*
                 None => {return Ok(VariableType (vec![TypeToken::Void]));}
@@ -533,8 +549,8 @@ fn unit_containing<R: gimli::Reader<Offset = usize>>(dwarf: &Dwarf<R>,
                         //_ => panic!("Could not handle entry offset {:?}", entry.offset())
                     };
                     /*
-                    println!("{:?}, ", entry.offset());
-                    println!("{:?} {:?}", entry_off + cu_off, off);
+                    println!("{:x?}, ", entry.offset());
+                    println!("{:x?} {:x?}", entry_off + cu_off, off);
                     */
                     if entry_off + cu_off == *off {
                         return Some((Some(unit), entry_off));
@@ -609,7 +625,7 @@ fn DIE_to_type<R: gimli::Reader<Offset = usize>>(dwarf: &Dwarf<R>,
                 //
             },
             _ => {
-                println!("{:?}", at_type_value);
+                //println!("{:?}", at_type_value);
                 return Err(());
                 //panic!("Unknown DW_AT_type value");
             }
@@ -776,10 +792,12 @@ fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &D
     //println!("{:?}", dejavu);
 
     match entry.tag() {
+        // Type modifiers -> We look into the underlying type
         gimli::constants::DW_TAG_pointer_type
         | gimli::constants::DW_TAG_array_type
         | gimli::constants::DW_TAG_restrict_type
         | gimli::constants::DW_TAG_const_type
+        | gimli::constants::DW_TAG_atomic_type
         | gimli::constants::DW_TAG_volatile_type
         | gimli::constants::DW_TAG_typedef => {
             match entry.attr_value(gimli::constants::DW_AT_type).unwrap() {
@@ -886,12 +904,11 @@ fn find_function_pointers_in_callsite<R>(dwarf: &Dwarf<R>,
 -> HashSet<FunctionType> where R: Reader<Offset = usize>, <R as Reader>::Offset: LowerHex {
     // Finf the abstract origin (
 
+    // Print DIE // DEBUG
     /*
-    // Print DIE
     println!("{}", entry.tag());
     let mut attrs = entry.attrs();
-    while let Some(attr) = attrs.next().unwrap() {println!("   {}: {:?}", attr.name(), attr.value());}
-    */
+    while let Some(attr) = attrs.next().unwrap() {println!("   {}: {:?}", attr.name(), attr.value());} */
 
     let abstract_origin = 
         if let Some(off) = entry.attr_value(gimli::constants::DW_AT_abstract_origin).unwrap(){
@@ -925,17 +942,17 @@ fn find_function_pointers_in_callsite<R>(dwarf: &Dwarf<R>,
                 //let return_value_type_DIE = get_DIE_at_offset(dwarf, unit, &at_type_value);
                 //return find_function_pointers_in_type(dwarf, unit, &return_value_type_DIE, dejavu);
                 let (new_unit, off) = match unit_containing(dwarf, &at_type_value) {
-                    Some((u, o)) => (u, o),
+                    Some((u2, o)) => (u2, o),
                     None => {return HashSet::new();}
                 };
-                if let Some(u) = new_unit {
+                if let Some(u2) = new_unit {
+                    let return_value_type_DIE = u2.entry(UnitOffset(off))
+                        .expect("New Unit. Did not find entry at offset");
+                    find_function_pointers_in_type(dwarf, &u2, &return_value_type_DIE, dejavu)
+                } else {
                     let return_value_type_DIE = u.entry(UnitOffset(off))
                         .expect("Did not find entry at offset");
                     find_function_pointers_in_type(dwarf, &u, &return_value_type_DIE, dejavu)
-                } else {
-                    let return_value_type_DIE = unit.entry(UnitOffset(off))
-                        .expect("Did not find entry at offset");
-                    find_function_pointers_in_type(dwarf, unit, &return_value_type_DIE, dejavu)
                 }
             }
         }
@@ -994,10 +1011,8 @@ fn find_function_pointers<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &Debugging
     let root = tree.root().unwrap();
     let mut children = root.children();
     while let Some(child) = children.next().unwrap() {
-        /*
-        println!("Finding fptr in subprogram {} {:x?} {:x?}", child.entry().tag(), child.entry().offset(), child.entry().offset().to_debug_info_offset(&unit.header).unwrap().0);
-        println!("fptr_type : {:#?}", function_pointers_types);
-        */
+        //println!("Finding fptr in subprogram {} {:x?} {:x?}", child.entry().tag(), child.entry().offset(), child.entry().offset().to_debug_info_offset(&unit.header).unwrap().0);
+        //println!("fptr_type : {:#?}", function_pointers_types);
         match child.entry().tag() {
             gimli::constants::DW_TAG_formal_parameter 
             | gimli::constants::DW_TAG_variable => {
