@@ -99,7 +99,9 @@ fn main() {
     let mut mmap_dict: MmapDict = MmapDict (HashMap::new());
     for (module_name, scope_entry) in &initial_analysis.scope.0 {
         if !scope_entry.has_symbols {
-            panic!("No symbols for {}", module_name);
+            //panic!("No symbols for {}", module_name);
+            println!("No symbols for {}", module_name);
+            continue;
         }
         println!("Loading dwarf of {}", module_name);
 
@@ -181,10 +183,19 @@ fn main() {
     // Find function types of indirect_targets
     let mut at_function_types = HashMap::new();
     for (module_name, _) in &initial_analysis.scope.0 {
-        at_function_types.extend(
-            find_all_function_types(&dwarf_dict.0[module_name], 
-                                    &module_name, 
-                                    &initial_analysis.indirect_targets));
+        // If we have DWARF info for this module
+        if dwarf_dict.0.contains_key(module_name) {
+            at_function_types.extend(
+                find_all_function_types(&dwarf_dict.0[module_name], 
+                                        &module_name, 
+                                        &initial_analysis.indirect_targets));
+        }
+    }
+    // Add all the AT functions in modules for which we don't have symbols
+    for fun in &initial_analysis.indirect_targets {
+        if !at_function_types.contains_key(&fun) {
+            at_function_types.insert(fun.clone(), None);
+        }
     }
 
     //println!("AT function types {:#?}", at_function_types);
