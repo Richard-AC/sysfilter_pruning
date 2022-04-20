@@ -816,6 +816,7 @@ fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &D
             };
         },
         gimli::constants::DW_TAG_structure_type 
+        | gimli::constants::DW_TAG_class_type 
         | gimli::constants::DW_TAG_union_type => {
             let mut function_types = HashSet::new();
             let mut tree = unit.entries_tree(Some(entry.offset())).unwrap();
@@ -823,6 +824,12 @@ fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &D
             let mut children = root.children();
             // Iterate through members
             while let Some(child) = children.next().unwrap() {
+                // In the case of DW_TAG_class_type a member can be a subroutine (method)
+                if child.entry().tag() == gimli::constants::DW_TAG_subprogram {
+                    assert!(entry.tag() == gimli::constants::DW_TAG_class_type);
+                    continue;
+                }
+
                 let at_type_value = child.entry().attr_value(gimli::constants::DW_AT_type)
                     .unwrap().expect("This local var or parameter has no type");
                 //let member_type_DIE = get_DIE_at_offset(dwarf, unit, &at_type_value);
@@ -840,8 +847,6 @@ fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &D
                         find_function_pointers_in_type(dwarf, unit, &member_type_DIE, dejavu)
                 };
                 function_types.extend(fct_ptrs);
-                //function_types.extend(find_function_pointers_in_type(dwarf, unit, &member_type_DIE, dejavu));
-
             }
             return function_types;
         }
