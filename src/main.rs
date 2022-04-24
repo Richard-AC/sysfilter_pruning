@@ -324,7 +324,7 @@ fn do_pruning<'a, R: gimli::Reader<Offset = usize>>(
         }
 
         current_len = current_authorized_ATs.len();
-        //println!("current_len = {} prev_len = {}", current_len, prev_len);
+        println!("current_len = {} prev_len = {}", current_len, prev_len);
     }
 
     // If main was added and the entry point is not __libc_start_main we remove it
@@ -406,11 +406,22 @@ fn type_DIE_to_type<R: gimli::Reader<Offset = usize>>(dwarf: &Dwarf<R>,
         gimli::constants::DW_TAG_typedef 
         | gimli::constants::DW_TAG_base_type 
         | gimli::constants::DW_TAG_enumeration_type 
+        | gimli::constants::DW_TAG_union_type
         | gimli::constants::DW_TAG_structure_type => {
             if let Some(at_name_value) = entry.attr_value(gimli::constants::DW_AT_name).unwrap() {
                 let type_string = match decode_string(dwarf, &at_name_value) {
                     Some(s) => s,
-                    None => {return Err(());},
+                    None => {
+                        // REMOVE THIS
+                        // OR ADD SUPPORT FOR SUP FILE
+                        /*
+                        println!("{}, {:?}", entry.tag(), entry.offset());
+                        let mut attrs = entry.attrs();
+                        while let Some(attr) = attrs.next().unwrap() {println!("   {}: {:?}", attr.name(), attr.value());}
+                        panic!();
+                        */
+                        return Err(());
+                    },
                 };
                 return Ok(VariableType (vec![TypeToken::Name(type_string)]));
             }
@@ -817,8 +828,9 @@ fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &D
     let entry_offset = entry.offset().to_debug_info_offset(&unit.header).unwrap().0;
     /*
     println!("Finding Function pointers in {} {:x?} {:x?} ", entry.tag(), entry.offset(),
-    entry.offset().to_debug_info_offset(&unit.header).unwrap().0, 
-    );
+    entry.offset().to_debug_info_offset(&unit.header).unwrap().0);
+    let mut attrs = entry.attrs();
+    while let Some(attr) = attrs.next().unwrap() {println!("   {}: {:?}", attr.name(), attr.value());} 
     */
 
     // If we already added the pointers of this type
@@ -882,18 +894,79 @@ fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &D
             let mut children = root.children();
             // Iterate through members
             while let Some(child) = children.next().unwrap() {
-                // In the case of DW_TAG_class_type a member can be a subroutine (method)
+                // Member functions
                 if child.entry().tag() == gimli::constants::DW_TAG_subprogram {
-                    assert!(entry.tag() == gimli::constants::DW_TAG_class_type);
                     continue;
                 }
 
-                let at_type_value = child.entry().attr_value(gimli::constants::DW_AT_type)
-                    .unwrap().expect("This local var or parameter has no type");
+                // Nested classes
+                if child.entry().tag() == gimli::constants::DW_TAG_class_type 
+                    || child.entry().tag() == gimli::constants::DW_TAG_structure_type 
+                    || child.entry().tag() == gimli::constants::DW_TAG_union_type {
+                    function_types.extend(
+                        find_function_pointers_in_type(dwarf, unit, &child.entry(), dejavu));
+                    continue;
+                }
+
+
+                /* REMOVE */
+                /*
+                println!("Member: {} {:x?} {:x?} ", child.entry().tag(), child.entry().offset(), child.entry().offset().to_debug_info_offset(&unit.header).unwrap().0);
+                let mut attrs = child.entry().attrs();
+                while let Some(attr) = attrs.next().unwrap() {println!("   {}: {:?}", attr.name(), attr.value());} 
+                */
+                /* /REMOVE */
+
+
+                let at_type_value;
+
+                if child.entry().tag() == gimli::constants::DW_TAG_imported_declaration {
+                    let at_import_value = child.entry().attr_value(gimli::constants::DW_AT_import)
+                        .unwrap().expect("Imported declaration with no DW_AT_import");
+                    let (new_unit, off) = match unit_containing(dwarf, &at_import_value) {
+                        Some((u, o)) => (u, o),
+                        None => {continue;}
+                    };
+                    let at_type_value_option = if let Some(u) = new_unit {
+                        let member_imported_DIE = u.entry(UnitOffset(off))
+                            .expect("Did not find entry at offset");
+                        member_imported_DIE.attr_value(gimli::constants::DW_AT_type)
+                            .unwrap()
+                    } else {
+                        let member_imported_DIE = unit.entry(UnitOffset(off))
+                            .expect("Did not find entry at offset");
+                        member_imported_DIE.attr_value(gimli::constants::DW_AT_type)
+                            .unwrap()
+                    };
+
+                    at_type_value = match at_type_value_option {
+                        Some(v) => v,
+                        None => {
+                            continue;
+                            //panic!("This member has no type");
+                        }
+                    }
+                }
+
+                else if child.entry().tag() == gimli::constants::DW_TAG_GNU_template_parameter_pack
+                  || child.entry().tag() == gimli::constants::DW_TAG_template_type_parameter {
+                    continue;
+                }
+
+                else {
+                    at_type_value = match child.entry().attr_value(gimli::constants::DW_AT_type)
+                    .unwrap() {
+                        Some(v) => v,
+                        None => {
+                            panic!("This member has no type");
+                        }
+                    }
+                }
+
                 //let member_type_DIE = get_DIE_at_offset(dwarf, unit, &at_type_value);
                 let (new_unit, off) = match unit_containing(dwarf, &at_type_value) {
                     Some((u, o)) => (u, o),
-                    None => {return HashSet::new();}
+                    None => {continue;}
                 };
                 let fct_ptrs = if let Some(u) = new_unit {
                     let member_type_DIE = u.entry(UnitOffset(off))
@@ -922,9 +995,14 @@ fn find_function_pointers_in_variable <R>(dwarf: &Dwarf<R>,
                                           entry: &DebuggingInformationEntry<R>,
                                           dejavu: &mut HashSet<usize>) 
 -> HashSet<FunctionType> where R: Reader<Offset = usize>, <R as Reader>::Offset: LowerHex {
+    /*
+    let entry_offset = entry.offset().to_debug_info_offset(&unit.header).unwrap().0;
+    println!("Finding Function pointers in {} {:x?} {:x?} ", entry.tag(), entry.offset(),
+    entry.offset().to_debug_info_offset(&unit.header).unwrap().0);
+    */
     // Find the type of this entry
     let at_type_value = entry.attr_value(gimli::constants::DW_AT_type)
-        .unwrap().expect("This local var or parameter has no type");
+        .unwrap().expect("This variable has no type");
     //let pointed_type_DIE = get_DIE_at_offset(dwarf, unit, &at_type_value);
     let (new_unit, off) = match unit_containing(dwarf, &at_type_value) {
         Some((u, o)) => (u, o),
@@ -1132,6 +1210,7 @@ fn find_function_pointer_types_in_globals<R>(dwarfinfo_dict: &DwarfinfoDict<R>,
 -> HashSet<FunctionType> where R: Reader<Offset = usize> + std::cmp::PartialEq, <R as Reader>::Offset: LowerHex {
     let mut fct_ptrs_types = HashSet::new();
     for module_name in dwarfinfo_dict.0.keys() {
+        //println!("{}", module_name);
         let dwarf = &dwarfinfo_dict.0[module_name];
         let dejavu = dejavu_sets.0.get_mut(module_name).unwrap();
         // Iterate over the compilation units.
