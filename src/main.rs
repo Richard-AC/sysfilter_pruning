@@ -317,14 +317,24 @@ fn do_pruning<'a, R: gimli::Reader<Offset = usize>>(
 
     while current_len != prev_len {
         prev_len = current_len;
-        current_authorized_ATs.extend(find_authorized_ATs(dwarf_dict, dejavu_sets, &callgraph, fun_ptrs_types_in_globals, &at_function_types));
+        let authorized_ATs = find_authorized_ATs(dwarf_dict, dejavu_sets, &callgraph, fun_ptrs_types_in_globals, &at_function_types);
 
-        for fun in &current_authorized_ATs {
+        // Reset the callgraph to only consider the function that were just added
+        callgraph = HashSet::new();
+
+        let diff = authorized_ATs.difference(&current_authorized_ATs);
+
+        //println!("Adding {} authorized ATs", diff.count());
+
+        for fun in diff {
             callgraph.extend(sysfilter::get_DCG(&initial_analysis.direct_edges, fun));
         }
 
+        current_authorized_ATs.extend(authorized_ATs);
+
         current_len = current_authorized_ATs.len();
         println!("current_len = {} prev_len = {}", current_len, prev_len);
+
     }
 
     // If main was added and the entry point is not __libc_start_main we remove it
