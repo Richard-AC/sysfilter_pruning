@@ -292,6 +292,24 @@ fn do_pruning<'a, R: gimli::Reader<Offset = usize>>(
                 module: String::from("(executable)"),
                 name: String::from("main"),
             });
+        current_authorized_ATs.insert(
+            Symbol {
+                module: String::from("entrypoint"),
+                name: String::from("main"),
+            });
+    }
+    // Otherwise we explicitly remove it 
+    else {
+        current_authorized_ATs.remove(
+            &Symbol {
+                module: String::from("(executable)"),
+                name: String::from("main"),
+            });
+        current_authorized_ATs.insert(
+            Symbol {
+                module: String::from("entrypoint"),
+                name: String::from(&entry.name),
+            });
     }
 
     let mut current_len = 0;
@@ -307,6 +325,15 @@ fn do_pruning<'a, R: gimli::Reader<Offset = usize>>(
 
         current_len = current_authorized_ATs.len();
         //println!("current_len = {} prev_len = {}", current_len, prev_len);
+    }
+
+    // If main was added and the entry point is not __libc_start_main we remove it
+    if !(entry.name == "__libc_start_main") {
+        current_authorized_ATs.remove(
+            &Symbol {
+                module: String::from("(executable)"),
+                name: String::from("main"),
+            });
     }
 
 
@@ -809,6 +836,7 @@ fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &D
         | gimli::constants::DW_TAG_restrict_type
         | gimli::constants::DW_TAG_const_type
         | gimli::constants::DW_TAG_rvalue_reference_type
+        | gimli::constants::DW_TAG_reference_type
         | gimli::constants::DW_TAG_atomic_type
         | gimli::constants::DW_TAG_volatile_type
         | gimli::constants::DW_TAG_typedef => {
