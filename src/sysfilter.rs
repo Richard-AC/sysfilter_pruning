@@ -30,8 +30,10 @@ pub struct InitialAnalysis {
     pub indirect_targets: HashSet<Symbol>,
     pub indirect_targets_string: Vec<String>,
     pub thread_entry_points : Vec<Symbol>,
+    pub fork_callers: Vec<Symbol>,
     pub direct_edges: Map<String, Value>,
-    pub syscalls: Vec<u64>
+    pub syscalls: Vec<u64>,
+    pub callgraph: HashSet<Symbol>
 }
 
 #[derive(Debug)]
@@ -114,21 +116,59 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
 
     }
 
-    // Find fork callers
-    // TODO
-
-
     // Find Direct edges
     let direct_edges = &json_data["vacuum"]["analysis"]["all"]["callgraph"]["direct_edges"]
         .as_object().unwrap();
+    // Find fork callers
+    let mut fork_callers = vec!();
+    for (fun, edges) in *direct_edges {
+        let edges = edges.as_array().unwrap();
+        for x in edges {
+            let x = x.as_str().unwrap();
+            let tokens: Vec<&str> = x.split(|c| c == '@' || c == '+').collect();
+            let function_name = tokens[1];
+            if function_name == "fork" || function_name == "fork_compat" {
+                let tokens: Vec<&str> = fun.split(|c| c == '@' || c == '+').collect();
+                let module_name = tokens[0];
+                let function_name = tokens[1];
+                if function_name != "fork" && function_name != "fork_compat" {
+                    println!("FOUND A FORK CALLER : {:?}", fun);
+                    fork_callers.push(Symbol {
+                        module: module_name.to_owned(),
+                        name: function_name.to_owned(),
+                    });
+                }
+            }
+        }
+    }
+
+
+    // Find all functions in callgraph
+    let mut callgraph = HashSet::new();
+    let funcs = &json_data["vacuum"]["analysis"]["all"]["callgraph"]["funcs"]
+        .as_object().unwrap();
+    for (f, _) in *funcs {
+        let f = f.as_str().to_owned();
+        let tokens: Vec<&str> = f.split(|c| c == '@' || c == '+').collect();
+        let module_name = tokens[0];
+        let function_name = tokens[1];
+
+        callgraph.insert(Symbol {
+            module: module_name.to_owned(),
+            name: function_name.to_owned(),
+        });
+    }
+
 
     InitialAnalysis {
         scope: scope,
         indirect_targets: indirect_targets_set,
         indirect_targets_string: indirect_targets_str,
         thread_entry_points,
+        fork_callers,
         direct_edges: (*direct_edges).to_owned(),
         syscalls,
+        callgraph,
     }
 }
 

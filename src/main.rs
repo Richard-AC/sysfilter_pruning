@@ -175,6 +175,9 @@ fn main() {
 
     let mut dejavu_sets = DejavuSets::new(initial_analysis.scope.0.keys().collect::<Vec<_>>());
 
+
+    find_relevant_CUs(&dwarf_dict, &initial_analysis);
+
     // Finding function pointers in global variables
     let fun_ptrs_types_in_globals = 
         find_function_pointer_types_in_globals(&dwarf_dict, &mut dejavu_sets);
@@ -215,6 +218,13 @@ fn main() {
         results.insert(thread_entry.clone(), res);
     }
 
+    for fork_caller in &initial_analysis.fork_callers {
+        println!("Fork caller : {:?}", fork_caller);
+        let res = analyze_one_entry_point(&dwarf_dict, &mut dejavu_sets, fork_caller, &initial_analysis, &fun_ptrs_types_in_globals, &at_function_types, binary_path, sysfilter_path);
+        println!("Syscalls len {}", res.syscalls.len());
+        results.insert(fork_caller.clone(), res);
+    }
+
     let mut file = File::create(output_path).expect("Failed to create output file");
 
     write!(file, "{{\n").unwrap();
@@ -237,6 +247,14 @@ fn main() {
         write!(file, "{{").unwrap();
         write!(file, "\"syscalls_len\" : {},\n", res.syscalls.len()).unwrap();
         write!(file, "\"indirect_targets_len\" : {},\n", res.indirect_targets.len()).unwrap();
+
+        if initial_analysis.fork_callers.contains(&entry) {
+            write!(file, "\"fork_caller\" : 1,\n").unwrap();
+        }
+        else if initial_analysis.thread_entry_points.contains(&entry) {
+            write!(file, "\"thread_entry\" : 1,\n").unwrap();
+        }
+
         write!(file, "\"syscalls\" : {:?},\n", res.syscalls).unwrap();
         write!(file, "\"indirect_targets\" : {:?}\n", res.indirect_targets).unwrap();
         write!(file, "}}").unwrap();
@@ -334,7 +352,6 @@ fn do_pruning<'a, R: gimli::Reader<Offset = usize>>(
 
         current_len = current_authorized_ATs.len();
         println!("current_len = {} prev_len = {}", current_len, prev_len);
-
     }
 
     // If main was added and the entry point is not __libc_start_main we remove it
@@ -404,6 +421,48 @@ fn find_authorized_ATs<'a, R: gimli::Reader<Offset = usize>>(
     }
     //println!("yes : {} no: {}", yes, no);
     return pruned_AT_set;
+}
+
+fn find_relevant_CUs<R>(dwarfinfo_dict: &DwarfinfoDict<R>, 
+                        initial_analysis: &InitialAnalysis) 
+    -> ()  where R: Reader<Offset = usize>, <R as Reader>::Offset: LowerHex
+{
+    let mut relevant_CUs = HashMap::new();
+    for module_name in dwarfinfo_dict.0.keys() {
+        let mut CUs = HashSet::new();
+        println!("{}", module_name);
+        let dwarf = &dwarfinfo_dict.0[module_name];
+        // Iterate over the compilation units.
+        let mut iter = dwarf.units();
+        while let Some(header) = iter.next().unwrap() {
+            let unit = dwarf.unit(header).unwrap();
+            // Iterate over the Debugging Information Entries (DIEs) in the unit.
+            let mut depth = 0;
+            let mut entries = unit.entries();
+            while let Some((delta_depth, entry)) = entries.next_dfs().unwrap() {
+                depth += delta_depth;
+                if entry.tag() == gimli::constants::DW_TAG_subprogram && depth == 1 {
+                    if let Some(name_value) = entry.attr_value(gimli::constants::DW_AT_name).unwrap() {
+                        if let Some(curr_function_name) = decode_string(dwarf, &name_value) {
+                            //println!("{}", curr_function_name);
+                            let symbol = Symbol {
+                                module: module_name.to_owned(),
+                                name: curr_function_name,
+                            };
+
+                            if initial_analysis.callgraph.contains(&symbol) {
+                                //println!("{:?}", symbol);
+                                CUs.insert(symbol);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        println!("{} {}", module_name, CUs.len());
+        relevant_CUs.insert(module_name.to_string(), CUs);
+    }
 }
 
 /// Return a VariableType from a type DIE 
