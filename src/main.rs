@@ -1018,6 +1018,7 @@ fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &D
                 }
 
                 else if child.entry().tag() == gimli::constants::DW_TAG_GNU_template_parameter_pack
+                  || child.entry().tag() == gimli::constants::DW_TAG_GNU_template_template_param
                   || child.entry().tag() == gimli::constants::DW_TAG_template_type_parameter {
                     continue;
                 }
@@ -1027,6 +1028,11 @@ fn find_function_pointers_in_type<R>(dwarf: &Dwarf<R>, unit: &Unit<R>, entry: &D
                     .unwrap() {
                         Some(v) => v,
                         None => {
+                            // REMOVE
+                            println!("Member: {} {:x?} {:x?} ", child.entry().tag(), child.entry().offset(), child.entry().offset().to_debug_info_offset(&unit.header).unwrap().0);
+                            let mut attrs = child.entry().attrs();
+                            while let Some(attr) = attrs.next().unwrap() {println!("   {}: {:?}", attr.name(), attr.value());} 
+                            //REMOVE
                             panic!("This member has no type");
                         }
                     }
