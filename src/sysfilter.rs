@@ -211,6 +211,7 @@ pub fn pruned_sysfilter_analysis(sysfilter_path: &str,
 }
 
 fn get_DCG_rec_helper(direct_edges: &Map<String, Value>, root: String, DCG: &mut HashSet<String>) {
+    //println!("{:?}", root);
     DCG.insert(root.to_owned());
     match direct_edges.get(&root) {
         Some(edges) => {
@@ -241,7 +242,13 @@ pub fn get_DCG_string(direct_edges: &Map<String, Value>, root: &Symbol) -> HashS
 }
 
 
-pub fn get_DCG(direct_edges: &Map<String, Value>, root: &Symbol) -> HashSet<Symbol> {
+pub fn get_DCG(direct_edges: &Map<String, Value>, root: &Symbol, 
+               DCGs_cache: &mut HashMap<Symbol, HashSet<Symbol>>) -> HashSet<Symbol> 
+{
+    if DCGs_cache.contains_key(root) {
+        println!("YES");
+        return DCGs_cache[root].clone();
+    }
     let mut DCG = HashSet::new();
     let dcg_string = get_DCG_string(direct_edges, root);
     for fun in dcg_string {
@@ -254,6 +261,8 @@ pub fn get_DCG(direct_edges: &Map<String, Value>, root: &Symbol) -> HashSet<Symb
             name: function_name.to_owned(),
         });
     }
+
+    DCGs_cache.insert(root.clone(), DCG.clone());
     DCG
 }
 

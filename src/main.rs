@@ -176,11 +176,11 @@ fn main() {
     let mut dejavu_sets = DejavuSets::new(initial_analysis.scope.0.keys().collect::<Vec<_>>());
 
 
-    find_relevant_CUs(&dwarf_dict, &initial_analysis);
+    let relevant_CUs = find_relevant_CUs(&dwarf_dict, &initial_analysis);
 
     // Finding function pointers in global variables
     let fun_ptrs_types_in_globals = 
-        find_function_pointer_types_in_globals(&dwarf_dict, &mut dejavu_sets);
+        find_function_pointer_types_in_globals(&dwarf_dict, &mut dejavu_sets, &relevant_CUs);
     //println!("fun ptrs types in globals {:?}", fun_ptrs_types_in_globals);
 
     // Find function types of indirect_targets
@@ -204,23 +204,24 @@ fn main() {
     //println!("AT function types {:#?}", at_function_types);
 
     let mut results = HashMap::new();
+    let mut DCGs_cache = HashMap::new();
 
     let entry = Symbol {module: String::from("libc.so.6"), name: String::from("__libc_start_main")};
     println!("Entry point : {:?}", entry);
-    let res = analyze_one_entry_point(&dwarf_dict, &mut dejavu_sets, &entry, &initial_analysis, &fun_ptrs_types_in_globals, &at_function_types, binary_path, sysfilter_path);
+    let res = analyze_one_entry_point(&dwarf_dict, &mut dejavu_sets, &entry, &initial_analysis, &fun_ptrs_types_in_globals, &at_function_types, binary_path, sysfilter_path, &mut DCGs_cache);
     println!("Syscalls len {}", res.syscalls.len());
     results.insert(entry, res);
 
     for thread_entry in &initial_analysis.thread_entry_points {
         println!("Entry point : {:?}", thread_entry);
-        let res = analyze_one_entry_point(&dwarf_dict, &mut dejavu_sets, thread_entry, &initial_analysis, &fun_ptrs_types_in_globals, &at_function_types, binary_path, sysfilter_path);
+        let res = analyze_one_entry_point(&dwarf_dict, &mut dejavu_sets, thread_entry, &initial_analysis, &fun_ptrs_types_in_globals, &at_function_types, binary_path, sysfilter_path, &mut DCGs_cache);
         println!("Syscalls len {}", res.syscalls.len());
         results.insert(thread_entry.clone(), res);
     }
 
     for fork_caller in &initial_analysis.fork_callers {
         println!("Fork caller : {:?}", fork_caller);
-        let res = analyze_one_entry_point(&dwarf_dict, &mut dejavu_sets, fork_caller, &initial_analysis, &fun_ptrs_types_in_globals, &at_function_types, binary_path, sysfilter_path);
+        let res = analyze_one_entry_point(&dwarf_dict, &mut dejavu_sets, fork_caller, &initial_analysis, &fun_ptrs_types_in_globals, &at_function_types, binary_path, sysfilter_path, &mut DCGs_cache);
         println!("Syscalls len {}", res.syscalls.len());
         results.insert(fork_caller.clone(), res);
     }
@@ -274,10 +275,11 @@ fn analyze_one_entry_point<'a, R: gimli::Reader<Offset = usize>>(
     fun_ptrs_types_in_globals: &'a HashSet<FunctionType>,
     at_function_types: &'a HashMap<Symbol, Option<FunctionType>>,
     binary_path: &str,
-    sysfilter_path: &str) 
+    sysfilter_path: &str,
+    DCGs_cache: &mut HashMap<Symbol, HashSet<Symbol>>) 
 -> PrunedAnalysis {
     let authorized_ATs = do_pruning(dwarf_dict, dejavu_sets, entry, initial_analysis, 
-                                    fun_ptrs_types_in_globals, at_function_types);
+                                    fun_ptrs_types_in_globals, at_function_types, DCGs_cache);
 
     let binary_name = binary_path.split('/').collect::<Vec<_>>();
     let authorized_fct_path = format!("{}_{}{}", binary_name.last().unwrap(), 
@@ -296,11 +298,12 @@ fn do_pruning<'a, R: gimli::Reader<Offset = usize>>(
     entry: &Symbol,
     initial_analysis: &'a InitialAnalysis,
     fun_ptrs_types_in_globals: &'a HashSet<FunctionType>,
-    at_function_types: &'a HashMap<Symbol, Option<FunctionType>>) 
+    at_function_types: &'a HashMap<Symbol, Option<FunctionType>>,
+    DCGs_cache: &mut HashMap<Symbol, HashSet<Symbol>>) 
 -> HashSet<Symbol>{
 
     // Get DCG
-    let mut callgraph = sysfilter::get_DCG(&initial_analysis.direct_edges, entry);
+    let mut callgraph = sysfilter::get_DCG(&initial_analysis.direct_edges, entry, DCGs_cache);
     let mut current_authorized_ATs = HashSet::new();
     
     // If the entry point is __libc_start_main we explicitly add main as an authorized AT
@@ -345,7 +348,8 @@ fn do_pruning<'a, R: gimli::Reader<Offset = usize>>(
         //println!("Adding {} authorized ATs", diff.count());
 
         for fun in diff {
-            callgraph.extend(sysfilter::get_DCG(&initial_analysis.direct_edges, fun));
+            callgraph.extend(
+                sysfilter::get_DCG(&initial_analysis.direct_edges, fun, DCGs_cache));
         }
 
         current_authorized_ATs.extend(authorized_ATs);
@@ -425,7 +429,7 @@ fn find_authorized_ATs<'a, R: gimli::Reader<Offset = usize>>(
 
 fn find_relevant_CUs<R>(dwarfinfo_dict: &DwarfinfoDict<R>, 
                         initial_analysis: &InitialAnalysis) 
-    -> ()  where R: Reader<Offset = usize>, <R as Reader>::Offset: LowerHex
+    -> HashMap<String, HashSet<usize>>  where R: Reader<Offset = usize>, <R as Reader>::Offset: LowerHex
 {
     let mut relevant_CUs = HashMap::new();
     for module_name in dwarfinfo_dict.0.keys() {
@@ -452,7 +456,13 @@ fn find_relevant_CUs<R>(dwarfinfo_dict: &DwarfinfoDict<R>,
 
                             if initial_analysis.callgraph.contains(&symbol) {
                                 //println!("{:?}", symbol);
-                                CUs.insert(symbol);
+                                let cu_off = match unit.header.offset() {
+                                    gimli::UnitSectionOffset::DebugInfoOffset(gimli::DebugInfoOffset(cu_offset)) => {
+                                        cu_offset
+                                    }
+                                    _ => {panic!("Could not handle offset");}
+                                };
+                                CUs.insert(cu_off);
                             }
                         }
                     }
@@ -463,6 +473,7 @@ fn find_relevant_CUs<R>(dwarfinfo_dict: &DwarfinfoDict<R>,
         println!("{} {}", module_name, CUs.len());
         relevant_CUs.insert(module_name.to_string(), CUs);
     }
+    relevant_CUs
 }
 
 /// Return a VariableType from a type DIE 
@@ -1281,10 +1292,12 @@ fn find_all_function_pointers_types<R>(dwarfinfo_dict: &DwarfinfoDict<R>,
 
 /// Find function pointer types in global variables
 fn find_function_pointer_types_in_globals<R>(dwarfinfo_dict: &DwarfinfoDict<R>, 
-                                       dejavu_sets: &mut DejavuSets)
+                                       dejavu_sets: &mut DejavuSets,
+                                       relevant_CUs: &HashMap<std::string::String, HashSet<usize>>)
 -> HashSet<FunctionType> where R: Reader<Offset = usize> + std::cmp::PartialEq, <R as Reader>::Offset: LowerHex {
     let mut fct_ptrs_types = HashSet::new();
     for module_name in dwarfinfo_dict.0.keys() {
+        let CUs = &relevant_CUs[module_name];
         //println!("{}", module_name);
         let dwarf = &dwarfinfo_dict.0[module_name];
         let dejavu = dejavu_sets.0.get_mut(module_name).unwrap();
@@ -1292,6 +1305,15 @@ fn find_function_pointer_types_in_globals<R>(dwarfinfo_dict: &DwarfinfoDict<R>,
         let mut iter = dwarf.units();
         while let Some(header) = iter.next().unwrap() {
             let unit = dwarf.unit(header).unwrap();
+            let cu_off = match unit.header.offset() {
+                gimli::UnitSectionOffset::DebugInfoOffset(gimli::DebugInfoOffset(cu_offset)) => {
+                    cu_offset
+                }
+                _ => {panic!("Could not handle offset");}
+            };
+            //if !CUs.contains(&cu_off) {
+                //continue;
+            //}
 
             // Iterate over the Debugging Information Entries (DIEs) in the unit.
             let mut depth = 0;
