@@ -487,6 +487,7 @@ fn type_DIE_to_type<R: gimli::Reader<Offset = usize>>(dwarf: &Dwarf<R>,
         | gimli::constants::DW_TAG_base_type 
         | gimli::constants::DW_TAG_enumeration_type 
         | gimli::constants::DW_TAG_union_type
+        | gimli::constants::DW_TAG_class_type
         | gimli::constants::DW_TAG_structure_type => {
             if let Some(at_name_value) = entry.attr_value(gimli::constants::DW_AT_name).unwrap() {
                 let type_string = match decode_string(dwarf, &at_name_value) {
