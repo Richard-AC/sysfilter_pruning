@@ -176,7 +176,8 @@ fn main() {
     let mut dejavu_sets = DejavuSets::new(initial_analysis.scope.0.keys().collect::<Vec<_>>());
 
 
-    let relevant_CUs = find_relevant_CUs(&dwarf_dict, &initial_analysis);
+    let relevant_CUs = HashMap::new();
+    //let relevant_CUs = find_relevant_CUs(&dwarf_dict, &initial_analysis);
 
     // Finding function pointers in global variables
     let fun_ptrs_types_in_globals = 
@@ -267,6 +268,8 @@ fn main() {
         i += 1;
     }
     write!(file, "\n}}").unwrap();
+
+    let _ = fs::remove_file(output_json);
 }
 
 fn analyze_one_entry_point<'a, R: gimli::Reader<Offset = usize>>(
@@ -290,6 +293,9 @@ fn analyze_one_entry_point<'a, R: gimli::Reader<Offset = usize>>(
     sysfilter::write_authorized_functions_json(&authorized_fct_path, &authorized_ATs);
     let pruned_results = sysfilter::pruned_sysfilter_analysis(sysfilter_path, binary_path, 
                                          &output_path, &authorized_fct_path);
+
+    let _ = fs::remove_file(output_path);
+    let _ = fs::remove_file(authorized_fct_path);
     return pruned_results;
 }
 
@@ -1296,11 +1302,11 @@ fn find_all_function_pointers_types<R>(dwarfinfo_dict: &DwarfinfoDict<R>,
 /// Find function pointer types in global variables
 fn find_function_pointer_types_in_globals<R>(dwarfinfo_dict: &DwarfinfoDict<R>, 
                                        dejavu_sets: &mut DejavuSets,
-                                       relevant_CUs: &HashMap<std::string::String, HashSet<usize>>)
+                                       _relevant_CUs: &HashMap<std::string::String, HashSet<usize>>)
 -> HashSet<FunctionType> where R: Reader<Offset = usize> + std::cmp::PartialEq, <R as Reader>::Offset: LowerHex {
     let mut fct_ptrs_types = HashSet::new();
     for module_name in dwarfinfo_dict.0.keys() {
-        let CUs = &relevant_CUs[module_name];
+        //let CUs = &relevant_CUs[module_name];
         //println!("{}", module_name);
         let dwarf = &dwarfinfo_dict.0[module_name];
         let dejavu = dejavu_sets.0.get_mut(module_name).unwrap();
@@ -1308,15 +1314,17 @@ fn find_function_pointer_types_in_globals<R>(dwarfinfo_dict: &DwarfinfoDict<R>,
         let mut iter = dwarf.units();
         while let Some(header) = iter.next().unwrap() {
             let unit = dwarf.unit(header).unwrap();
+            /*
             let cu_off = match unit.header.offset() {
                 gimli::UnitSectionOffset::DebugInfoOffset(gimli::DebugInfoOffset(cu_offset)) => {
                     cu_offset
                 }
                 _ => {panic!("Could not handle offset");}
             };
-            //if !CUs.contains(&cu_off) {
-                //continue;
-            //}
+            if !CUs.contains(&cu_off) {
+                continue;
+            }
+            */
 
             // Iterate over the Debugging Information Entries (DIEs) in the unit.
             let mut depth = 0;
