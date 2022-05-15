@@ -40,6 +40,7 @@ pub struct InitialAnalysis {
 pub struct PrunedAnalysis {
     pub syscalls: Vec<u64>,
     pub indirect_targets: Vec<String>,
+    pub callgraph: HashSet<Symbol>
 }
 
 pub fn initial_sysfilter_analysis(sysfilter_path: &str,
@@ -203,10 +204,25 @@ pub fn pruned_sysfilter_analysis(sysfilter_path: &str,
         let indirect_target = indirect_target.as_str().unwrap().to_owned();
         indirect_targets_vec.push(indirect_target);
     }
+    let mut callgraph = HashSet::new();
+    let funcs = &json_data["init"]["analysis"]["all"]["callgraph"]["funcs"]
+        .as_object().unwrap();
+    for (f, _) in *funcs {
+        let f = f.as_str().to_owned();
+        let tokens: Vec<&str> = f.split(|c| c == '@' || c == '+').collect();
+        let module_name = tokens[0];
+        let function_name = tokens[1];
+
+        callgraph.insert(Symbol {
+            module: module_name.to_owned(),
+            name: function_name.to_owned(),
+        });
+    }
 
     PrunedAnalysis {
         syscalls,
         indirect_targets: indirect_targets_vec,
+        callgraph,
     }
 }
 
@@ -246,7 +262,6 @@ pub fn get_DCG(direct_edges: &Map<String, Value>, root: &Symbol,
                DCGs_cache: &mut HashMap<Symbol, HashSet<Symbol>>) -> HashSet<Symbol> 
 {
     if DCGs_cache.contains_key(root) {
-        println!("YES");
         return DCGs_cache[root].clone();
     }
     let mut DCG = HashSet::new();

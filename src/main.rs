@@ -235,6 +235,7 @@ fn main() {
     write!(file, "{{").unwrap();
     write!(file, "\"syscalls_len\" : {},\n", initial_analysis.syscalls.len()).unwrap();
     write!(file, "\"indirect_targets_len\" : {},\n", initial_analysis.indirect_targets_string.len()).unwrap();
+    write!(file, "\"callgraph_len\" : {},\n", initial_analysis.callgraph.len()).unwrap();
     write!(file, "\"syscalls\" : {:?},\n", initial_analysis.syscalls).unwrap();
     write!(file, "\"indirect_targets\" : {:?}\n", initial_analysis.indirect_targets_string).unwrap();
     write!(file, "}}").unwrap();
@@ -248,6 +249,7 @@ fn main() {
         write!(file, "{{").unwrap();
         write!(file, "\"syscalls_len\" : {},\n", res.syscalls.len()).unwrap();
         write!(file, "\"indirect_targets_len\" : {},\n", res.indirect_targets.len()).unwrap();
+        write!(file, "\"callgraph_len\" : {},\n", res.callgraph.len()).unwrap();
 
         if initial_analysis.fork_callers.contains(&entry) {
             write!(file, "\"fork_caller\" : 1,\n").unwrap();
