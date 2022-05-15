@@ -4,7 +4,11 @@ use std::fs::{self, File};
 use std::io::Write;
 use serde_json::{Value, Map};
 use serde::{Serialize, Deserialize};
-use std::process::Command;
+use std::process::{self, Command};
+
+// Unix only, for getting signal termination code
+use std::os::unix::process::ExitStatusExt;
+
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -47,11 +51,25 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
                                   binary_path: &str,
                                   output_path: &str) -> InitialAnalysis {
     // Execute Sysfilter
-    Command::new(sysfilter_path)
+    let status = Command::new(sysfilter_path)
         .args(["--full-json", "--arg-mode", "--dump-fcg", "-o", output_path, binary_path])
         .spawn()
         .expect("Failed to execute sysfilter")
         .wait().expect("Failed to wait for sysfilter");
+
+    match status.signal() {
+        Some(s) => {process::exit(-s)},
+        _ => (),
+    }
+    let status = match status.code() {
+        Some(s) => s,
+        None => {
+            process::exit(-9);
+        }
+    };
+    if status != 0 {
+        process::exit(status);
+    }
     
     // Load the json output
     let json_data = load_json(output_path);
@@ -179,11 +197,25 @@ pub fn pruned_sysfilter_analysis(sysfilter_path: &str,
                                   authorized_fct_path: &str) -> PrunedAnalysis 
 {
     // Execute Sysfilter
-    Command::new(sysfilter_path)
+    let status = Command::new(sysfilter_path)
         .args(["--full-json", "--dump-fcg", "--atpruned-fcg", "--pruned-ATs-file", authorized_fct_path, "-o", output_path, binary_path])
         .spawn()
         .expect("Failed to execute sysfilter with pruning")
         .wait().expect("Failed to wait for sysfilter (with pruning)");
+
+    match status.signal() {
+        Some(s) => {process::exit(-s)},
+        _ => (),
+    }
+    let status = match status.code() {
+        Some(s) => s,
+        None => {
+            process::exit(-9);
+        }
+    };
+    if status != 0 {
+        process::exit(status);
+    }
 
     // Load the json output
     let json_data = load_json(output_path);
