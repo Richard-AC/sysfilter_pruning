@@ -51,6 +51,7 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
                                   binary_path: &str,
                                   output_path: &str) -> InitialAnalysis {
     // Execute Sysfilter
+    /*
     let status = Command::new(sysfilter_path)
         .args(["--full-json", "--arg-mode", "--dump-fcg", "-o", output_path, binary_path])
         .spawn()
@@ -70,6 +71,7 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
     if status != 0 {
         process::exit(status);
     }
+        */
     
     // Load the json output
     let json_data = load_json(output_path);
@@ -258,14 +260,33 @@ pub fn pruned_sysfilter_analysis(sysfilter_path: &str,
     }
 }
 
-fn get_DCG_rec_helper(direct_edges: &Map<String, Value>, root: String, DCG: &mut HashSet<String>) {
-    //println!("{:?}", root);
+fn get_DCG_rec_helper(direct_edges: &Map<String, Value>, root: String, DCG: &mut HashSet<String>, DCG_string_cache: &mut HashMap<String, HashSet<String>>, parents: &mut Vec<String>) {
+
+    if DCG_string_cache.contains_key(&root) {
+        //println!("dejavu");
+        DCG.extend(DCG_string_cache[&root].clone());
+    } else {
+        DCG_string_cache.insert(root.clone(), HashSet::new());
+    }
+
+    parents.push(root.to_owned());
+    /*
+    println!("{:?}", root);
+    println!("Parents: {:?}", parents);
+    println!("DCG_string_cache: {:?}", DCG_string_cache);
+    */
     DCG.insert(root.to_owned());
+
+    for p in &*parents {
+        let s = DCG_string_cache.get_mut(p).unwrap();
+        s.insert(root.to_owned());
+    }
+
     match direct_edges.get(&root) {
         Some(edges) => {
             for fun in edges.as_array().unwrap() {
                 if !DCG.contains(fun.as_str().unwrap()) { 
-                    get_DCG_rec_helper(direct_edges, fun.as_str().unwrap().to_owned(), DCG);
+                    get_DCG_rec_helper(direct_edges, fun.as_str().unwrap().to_owned(), DCG, DCG_string_cache, parents);
                 }
             }
         }
@@ -273,7 +294,7 @@ fn get_DCG_rec_helper(direct_edges: &Map<String, Value>, root: String, DCG: &mut
     }
 }
 
-pub fn get_DCG_string(direct_edges: &Map<String, Value>, root: &Symbol) -> HashSet<String> {
+pub fn get_DCG_string(direct_edges: &Map<String, Value>, root: &Symbol, DCG_string_cache: &mut HashMap<String, HashSet<String>>) -> HashSet<String> {
     let mut DCG = HashSet::new();
     DCG.insert(format!("{}@{}+0", root.module, root.name));
     for (fun, edges) in direct_edges {
@@ -282,7 +303,7 @@ pub fn get_DCG_string(direct_edges: &Map<String, Value>, root: &Symbol) -> HashS
         let function_name = tokens[1];
         if function_name == root.name && module_name == root.module {
             for fun in edges.as_array().unwrap() {
-                get_DCG_rec_helper(direct_edges, fun.as_str().unwrap().to_owned(), &mut DCG);
+                get_DCG_rec_helper(direct_edges, fun.as_str().unwrap().to_owned(), &mut DCG, DCG_string_cache, &mut vec!());
             }
         }
     }
@@ -291,13 +312,14 @@ pub fn get_DCG_string(direct_edges: &Map<String, Value>, root: &Symbol) -> HashS
 
 
 pub fn get_DCG(direct_edges: &Map<String, Value>, root: &Symbol, 
-               DCGs_cache: &mut HashMap<Symbol, HashSet<Symbol>>) -> HashSet<Symbol> 
+               DCGs_cache: &mut HashMap<Symbol, HashSet<Symbol>>,
+               DCG_string_cache: &mut HashMap<String, HashSet<String>>) -> HashSet<Symbol> 
 {
     if DCGs_cache.contains_key(root) {
         return DCGs_cache[root].clone();
     }
     let mut DCG = HashSet::new();
-    let dcg_string = get_DCG_string(direct_edges, root);
+    let dcg_string = get_DCG_string(direct_edges, root, DCG_string_cache);
     for fun in dcg_string {
         let tokens: Vec<&str> = fun.split(|c| c == '@' || c == '+').collect();
         let module_name = tokens[0];

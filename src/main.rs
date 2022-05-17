@@ -206,23 +206,24 @@ fn main() {
 
     let mut results = HashMap::new();
     let mut DCGs_cache = HashMap::new();
+    let mut DCG_string_cache = HashMap::new();
 
     let entry = Symbol {module: String::from("libc.so.6"), name: String::from("__libc_start_main")};
     println!("Entry point : {:?}", entry);
-    let res = analyze_one_entry_point(&dwarf_dict, &mut dejavu_sets, &entry, &initial_analysis, &fun_ptrs_types_in_globals, &at_function_types, binary_path, sysfilter_path, &mut DCGs_cache);
+    let res = analyze_one_entry_point(&dwarf_dict, &mut dejavu_sets, &entry, &initial_analysis, &fun_ptrs_types_in_globals, &at_function_types, binary_path, sysfilter_path, &mut DCGs_cache, &mut DCG_string_cache);
     println!("Syscalls len {}", res.syscalls.len());
     results.insert(entry, res);
 
     for thread_entry in &initial_analysis.thread_entry_points {
         println!("Entry point : {:?}", thread_entry);
-        let res = analyze_one_entry_point(&dwarf_dict, &mut dejavu_sets, thread_entry, &initial_analysis, &fun_ptrs_types_in_globals, &at_function_types, binary_path, sysfilter_path, &mut DCGs_cache);
+        let res = analyze_one_entry_point(&dwarf_dict, &mut dejavu_sets, thread_entry, &initial_analysis, &fun_ptrs_types_in_globals, &at_function_types, binary_path, sysfilter_path, &mut DCGs_cache, &mut DCG_string_cache);
         println!("Syscalls len {}", res.syscalls.len());
         results.insert(thread_entry.clone(), res);
     }
 
     for fork_caller in &initial_analysis.fork_callers {
         println!("Fork caller : {:?}", fork_caller);
-        let res = analyze_one_entry_point(&dwarf_dict, &mut dejavu_sets, fork_caller, &initial_analysis, &fun_ptrs_types_in_globals, &at_function_types, binary_path, sysfilter_path, &mut DCGs_cache);
+        let res = analyze_one_entry_point(&dwarf_dict, &mut dejavu_sets, fork_caller, &initial_analysis, &fun_ptrs_types_in_globals, &at_function_types, binary_path, sysfilter_path, &mut DCGs_cache, &mut DCG_string_cache);
         println!("Syscalls len {}", res.syscalls.len());
         results.insert(fork_caller.clone(), res);
     }
@@ -281,10 +282,12 @@ fn analyze_one_entry_point<'a, R: gimli::Reader<Offset = usize>>(
     at_function_types: &'a HashMap<Symbol, Option<FunctionType>>,
     binary_path: &str,
     sysfilter_path: &str,
-    DCGs_cache: &mut HashMap<Symbol, HashSet<Symbol>>) 
+    DCGs_cache: &mut HashMap<Symbol, HashSet<Symbol>>, 
+    DCG_string_cache: &mut HashMap<String, HashSet<String>>) 
 -> PrunedAnalysis {
     let authorized_ATs = do_pruning(dwarf_dict, dejavu_sets, entry, initial_analysis, 
-                                    fun_ptrs_types_in_globals, at_function_types, DCGs_cache);
+                                    fun_ptrs_types_in_globals, at_function_types, DCGs_cache,
+                                    DCG_string_cache);
 
     let binary_name = binary_path.split('/').collect::<Vec<_>>();
     let authorized_fct_path = format!("{}_{}{}", binary_name.last().unwrap(), 
@@ -307,11 +310,13 @@ fn do_pruning<'a, R: gimli::Reader<Offset = usize>>(
     initial_analysis: &'a InitialAnalysis,
     fun_ptrs_types_in_globals: &'a HashSet<FunctionType>,
     at_function_types: &'a HashMap<Symbol, Option<FunctionType>>,
-    DCGs_cache: &mut HashMap<Symbol, HashSet<Symbol>>) 
+    DCGs_cache: &mut HashMap<Symbol, HashSet<Symbol>>,
+    DCG_string_cache: &mut HashMap<String, HashSet<String>>) 
 -> HashSet<Symbol>{
 
     // Get DCG
-    let mut callgraph = sysfilter::get_DCG(&initial_analysis.direct_edges, entry, DCGs_cache);
+    let mut callgraph = sysfilter::get_DCG(&initial_analysis.direct_edges, entry, DCGs_cache,
+                                           DCG_string_cache);
     let mut current_authorized_ATs = HashSet::new();
     
     // If the entry point is __libc_start_main we explicitly add main as an authorized AT
@@ -357,7 +362,7 @@ fn do_pruning<'a, R: gimli::Reader<Offset = usize>>(
 
         for fun in diff {
             callgraph.extend(
-                sysfilter::get_DCG(&initial_analysis.direct_edges, fun, DCGs_cache));
+                sysfilter::get_DCG(&initial_analysis.direct_edges, fun, DCGs_cache, DCG_string_cache));
         }
 
         current_authorized_ATs.extend(authorized_ATs);
