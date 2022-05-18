@@ -51,7 +51,6 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
                                   binary_path: &str,
                                   output_path: &str) -> InitialAnalysis {
     // Execute Sysfilter
-    /*
     let status = Command::new(sysfilter_path)
         .args(["--full-json", "--arg-mode", "--dump-fcg", "-o", output_path, binary_path])
         .spawn()
@@ -71,7 +70,6 @@ pub fn initial_sysfilter_analysis(sysfilter_path: &str,
     if status != 0 {
         process::exit(status);
     }
-        */
     
     // Load the json output
     let json_data = load_json(output_path);
@@ -261,10 +259,11 @@ pub fn pruned_sysfilter_analysis(sysfilter_path: &str,
 }
 
 fn get_DCG_rec_helper(direct_edges: &Map<String, Value>, root: String, DCG: &mut HashSet<String>, DCG_string_cache: &mut HashMap<String, HashSet<String>>, parents: &mut Vec<String>) {
-
     if DCG_string_cache.contains_key(&root) {
         //println!("dejavu");
+        //println!("dejavu {:?} {:?}", root, &DCG_string_cache[&root]);
         DCG.extend(DCG_string_cache[&root].clone());
+        return;
     } else {
         DCG_string_cache.insert(root.clone(), HashSet::new());
     }
@@ -275,12 +274,12 @@ fn get_DCG_rec_helper(direct_edges: &Map<String, Value>, root: String, DCG: &mut
     println!("Parents: {:?}", parents);
     println!("DCG_string_cache: {:?}", DCG_string_cache);
     */
-    DCG.insert(root.to_owned());
 
     for p in &*parents {
         let s = DCG_string_cache.get_mut(p).unwrap();
         s.insert(root.to_owned());
     }
+    DCG.insert(root.to_owned());
 
     match direct_edges.get(&root) {
         Some(edges) => {
